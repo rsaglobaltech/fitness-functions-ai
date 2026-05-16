@@ -417,7 +417,7 @@ Air-gapped: mirror en Artifactory/Nexus como artefactos versionados.
 |---|---|---|---|---|
 | H0 | ✅ | Semana 1 | Setup y fundaciones | `d9968cf` |
 | H1 | ✅ | Semanas 2-3 | Esquema y detector de estilo | `99c9739` |
-| H2 | ✅ | Semanas 4-5 | Motor core + reglas universales | _en proceso de push_ |
+| H2 | ✅ | Semanas 4-5 | Motor core + reglas universales | `ec7866c` |
 | H3 | ⏳ | Semanas 6-7 | Primer rule pack (Hexagonal) + RAG | — |
 | H4 | ⏳ | Semana 8 | Rule packs adicionales (MVC, Microservicios) | — |
 | H5 | ⏳ | Semanas 9-10 | Integración CI/CD + bot de comentarios | — |
