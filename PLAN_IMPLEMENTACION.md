@@ -411,18 +411,94 @@ Air-gapped: mirror en Artifactory/Nexus como artefactos versionados.
 
 ## 6. Roadmap por Hitos
 
-| Hito | Duración | Foco | Estado al finalizar |
-|---|---|---|---|
-| H0 | Semana 1 | Setup y fundaciones | Repos y entornos listos |
-| H1 | Semanas 2-3 | Esquema y detector de estilo | Repo declara/detecta arquitectura |
-| H2 | Semanas 4-5 | Motor core + reglas universales | Análisis funcional mínimo |
-| H3 | Semanas 6-7 | Primer rule pack (Hexagonal) + RAG | MVP analítico completo |
-| H4 | Semana 8 | Rule packs adicionales (MVC, Microservicios) | 3 estilos soportados |
-| H5 | Semanas 9-10 | Integración CI/CD + bot de comentarios | Herramienta usable en PRs |
-| H6 | Semanas 11-12 | Modo sombra y dashboard | Calibración con datos reales |
-| H7 | Semana 13 | Go-live piloto + capacitación | Producción controlada |
+> **Estado**: ✅ done · 🚧 in-progress · ⏳ pending
+
+| Hito | Estado | Duración | Foco | Commit |
+|---|---|---|---|---|
+| H0 | ✅ | Semana 1 | Setup y fundaciones | `d9968cf` |
+| H1 | ✅ | Semanas 2-3 | Esquema y detector de estilo | _en proceso de push_ |
+| H2 | ⏳ | Semanas 4-5 | Motor core + reglas universales | — |
+| H3 | ⏳ | Semanas 6-7 | Primer rule pack (Hexagonal) + RAG | — |
+| H4 | ⏳ | Semana 8 | Rule packs adicionales (MVC, Microservicios) | — |
+| H5 | ⏳ | Semanas 9-10 | Integración CI/CD + bot de comentarios | — |
+| H6 | ⏳ | Semanas 11-12 | Modo sombra y dashboard | — |
+| H7 | ⏳ | Semana 13 | Go-live piloto + capacitación | — |
 
 **Total: 13 semanas para MVP** con 3 estilos arquitectónicos + reglas universales.
+
+### Progreso por feature
+
+#### H0 — Setup y Fundaciones ✅
+
+- ✅ F0.1 Repositorios y estructura monorepo (`packages/engine`, `packages/catalog`)
+- ✅ F0.2 Tooling base (uv workspace, ruff, mypy strict, black, pytest, structlog, pydantic-settings, pre-commit, Dockerfile)
+- ✅ F0.3 CI del proyecto (GitHub Actions: lint + typecheck + test + docker, dependabot, badges)
+- ✅ F0.4 Acceso LLM + observabilidad (AnthropicLLMClient, BudgetGuard, LangfuseTracer/NullTracer, docker-compose.dev.yml, secrets doc)
+- ✅ F0.5 Dataset gold inicial (18 casos, JSON Schema, GoldDataset loader)
+
+**Estado engine**: 20 tests passing · coverage 83.78% · mypy strict clean · ruff clean.
+
+#### H1 — Esquema y Detector de Estilo ✅
+
+- ✅ F1.1 JSON Schema del `.architecture.yaml` (`packages/catalog/schema/architecture_yaml_v1.json`)
+- ✅ F1.2 Parser y validador con Pydantic (`engine.config`)
+- ✅ F1.3 Detector heurístico de estilos (folder + manifest + filename signals, runner-up-weighted confidence)
+- ✅ F1.4 Resolver: declarado > detectado (≥0.8) > universal + warning de divergencia
+- ✅ F1.5 Tests sobre 6 fixtures sintéticos (hexagonal, mvc, microservices, modular_monolith, fsd, ambiguous)
+
+**Estado engine**: 41 tests passing · coverage 89.35% · mypy strict clean · ruff clean.
+
+#### H2 — Motor Core + Reglas Universales ⏳
+
+- ⏳ F2.1 Extractor de diff y contexto (PR vía API)
+- ⏳ F2.2 Análisis AST con Tree-sitter (Python, TS, Java)
+- ⏳ F2.3 Detector de dependencias circulares (Tarjan)
+- ⏳ F2.4 Detector de God Objects (LOC, métodos, LCOM4)
+- ⏳ F2.5 Detector de complejidad ciclomática
+- ⏳ F2.6 Sistema de severidad y agregación (Pydantic Finding)
+
+#### H3 — Primer Rule Pack (Hexagonal) + RAG ⏳
+
+- ⏳ F3.1 Carga de rule packs desde catálogo (cache TTL)
+- ⏳ F3.2 Detectores deterministas Hexagonal (layer_violation, dependency_direction, port_without_adapter)
+- ⏳ F3.3 Pipeline LLM con LangGraph (retry, validación Pydantic)
+- ⏳ F3.4 RAG con Qdrant + Voyage embeddings + LlamaIndex chunking
+- ⏳ F3.5 Prompt `domain_logic_leak` con 10-15 few-shot
+- ⏳ F3.6 Budget guard de costos integrado en pipeline
+
+#### H4 — Rule Packs MVC y Microservicios ⏳
+
+- ⏳ F4.1 Rule pack MVC v1.0.0
+- ⏳ F4.2 Rule pack Microservicios v1.0.0
+- ⏳ F4.3 Refactor `engine.detector_base` si emergen abstracciones comunes
+- ⏳ F4.4 Documentación "Cómo crear un rule pack" + cookiecutter
+
+#### H5 — Integración CI/CD + Bot de Comentarios ⏳
+
+- ⏳ F5.1 GitHub Action `arch-guardian-action`
+- ⏳ F5.2 Cliente GitHub GraphQL para comentarios
+- ⏳ F5.3 Mecanismo de bloqueo por severidad
+- ⏳ F5.4 Comando `/ai-ignore` con razones tipadas + persistencia PostgreSQL
+- ⏳ F5.5 Adaptadores GitLab CI y Bitbucket Pipelines
+- ⏳ F5.6 Endpoints `/health` y `/metrics`
+
+#### H6 — Modo Sombra y Calibración ⏳
+
+- ⏳ F6.1 Modo `shadow` (persist findings, no comments)
+- ⏳ F6.2 Dashboard Metabase
+- ⏳ F6.3 UI Streamlit de etiquetado TP/FP
+- ⏳ F6.4 Promptfoo regresión (bloquea PRs que degradan precisión >2%)
+- ⏳ F6.5 A/B testing prompts Langfuse
+- ⏳ F6.6 Ajuste fino basado en datos
+
+#### H7 — Go-Live Piloto y Capacitación ⏳
+
+- ⏳ F7.1 Activación gradual (shadow → comment-only → block)
+- ⏳ F7.2 Material capacitación (slide deck + Loom + FAQ)
+- ⏳ F7.3 Canal Slack `#arch-guardian` + bot
+- ⏳ F7.4 Runbook de incidentes
+- ⏳ F7.5 Métricas ejecutivas (sin métricas individuales)
+- ⏳ F7.6 Plan rollout post-piloto
 
 ---
 

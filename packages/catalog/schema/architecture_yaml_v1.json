@@ -1,0 +1,162 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://arch-guardian.dev/schemas/architecture-yaml-v1.json",
+  "title": "Architecture profile",
+  "description": "Declarative architectural contract for a single repository. Lives at .architecture.yaml in the repo root.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "project", "architecture"],
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "enum": ["1.0"]
+    },
+    "project": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "language"],
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "language": {
+          "type": "string",
+          "enum": [
+            "python",
+            "typescript",
+            "javascript",
+            "java",
+            "csharp",
+            "kotlin",
+            "go",
+            "ruby"
+          ]
+        },
+        "runtime": {
+          "type": "string",
+          "description": "Optional runtime hint (e.g. node20, jvm17, dotnet8)."
+        }
+      }
+    },
+    "architecture": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["style", "rule_pack_version"],
+      "properties": {
+        "style": {
+          "type": "string",
+          "enum": [
+            "hexagonal",
+            "layered",
+            "mvc",
+            "microservices",
+            "event_driven_cqrs",
+            "modular_monolith",
+            "vertical_slice",
+            "feature_sliced_design",
+            "ddd",
+            "plugin_microkernel",
+            "pipes_filters",
+            "universal"
+          ]
+        },
+        "rule_pack_version": {
+          "type": "string",
+          "pattern": "^[0-9]+(\\.[0-9]+){0,2}(\\.[xX])?$",
+          "description": "SemVer pin: '2.3.0', '2.3.x', or '2.x'."
+        },
+        "strict_mode": {
+          "type": "boolean",
+          "default": false
+        }
+      }
+    },
+    "layout": {
+      "type": "object",
+      "description": "Style-specific layout configuration. Free-form; validated by the rule pack at runtime.",
+      "additionalProperties": true
+    },
+    "universal_rules": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "circular_dependencies": {
+          "$ref": "#/$defs/ruleToggle"
+        },
+        "god_object_threshold": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "severity": { "$ref": "#/$defs/severity" },
+            "max_methods": { "type": "integer", "minimum": 1, "default": 25 },
+            "max_loc": { "type": "integer", "minimum": 1, "default": 500 }
+          }
+        },
+        "cyclomatic_complexity": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "severity": { "$ref": "#/$defs/severity" },
+            "max_per_function": { "type": "integer", "minimum": 1, "default": 15 }
+          }
+        },
+        "mutable_global_state": {
+          "$ref": "#/$defs/ruleToggle"
+        }
+      }
+    },
+    "knowledge_base": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "adr_path": { "type": "string" },
+        "conventions_path": { "type": "string" },
+        "exclude_patterns": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      }
+    },
+    "exceptions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["path", "reason"],
+        "properties": {
+          "path": { "type": "string", "minLength": 1 },
+          "reason": { "type": "string", "minLength": 5 },
+          "expires": {
+            "type": "string",
+            "format": "date"
+          },
+          "suppress_rules": {
+            "type": "array",
+            "items": { "type": "string" }
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "severity": {
+      "type": "string",
+      "enum": ["critical", "warning", "suggestion", "off"]
+    },
+    "ruleToggle": {
+      "oneOf": [
+        { "$ref": "#/$defs/severity" },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "severity": { "$ref": "#/$defs/severity" },
+            "enabled": { "type": "boolean", "default": true }
+          }
+        }
+      ]
+    }
+  }
+}
