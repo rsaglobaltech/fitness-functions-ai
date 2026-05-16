@@ -21,3 +21,6 @@ htmlcov/
 .DS_Store
 *.log
 node_modules/
+coverage.xml
+.tool-versions
+
