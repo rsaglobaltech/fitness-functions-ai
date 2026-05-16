@@ -417,7 +417,7 @@ Air-gapped: mirror en Artifactory/Nexus como artefactos versionados.
 |---|---|---|---|---|
 | H0 | ✅ | Semana 1 | Setup y fundaciones | `d9968cf` |
 | H1 | ✅ | Semanas 2-3 | Esquema y detector de estilo | `99c9739` |
-| H2 | ⏳ | Semanas 4-5 | Motor core + reglas universales | — |
+| H2 | ✅ | Semanas 4-5 | Motor core + reglas universales | _en proceso de push_ |
 | H3 | ⏳ | Semanas 6-7 | Primer rule pack (Hexagonal) + RAG | — |
 | H4 | ⏳ | Semana 8 | Rule packs adicionales (MVC, Microservicios) | — |
 | H5 | ⏳ | Semanas 9-10 | Integración CI/CD + bot de comentarios | — |
@@ -448,14 +448,18 @@ Air-gapped: mirror en Artifactory/Nexus como artefactos versionados.
 
 **Estado engine**: 41 tests passing · coverage 89.35% · mypy strict clean · ruff clean.
 
-#### H2 — Motor Core + Reglas Universales ⏳
+#### H2 — Motor Core + Reglas Universales ✅
 
-- ⏳ F2.1 Extractor de diff y contexto (PR vía API)
-- ⏳ F2.2 Análisis AST con Tree-sitter (Python, TS, Java)
-- ⏳ F2.3 Detector de dependencias circulares (Tarjan)
-- ⏳ F2.4 Detector de God Objects (LOC, métodos, LCOM4)
-- ⏳ F2.5 Detector de complejidad ciclomática
-- ⏳ F2.6 Sistema de severidad y agregación (Pydantic Finding)
+- ✅ F2.1 Diff extractor (`LocalGitDiff` + `DiffSource` protocol, cap por archivos/changes)
+- ✅ F2.2 AST analyzer Tree-sitter (Python, TS, TSX, JS, Java) + import DiGraph
+- ✅ F2.3 Circular dependencies (Tarjan vía `networkx`, SCC >1 → Finding crítico)
+- ✅ F2.4 God Object (2-of-3 thresholds: methods, LOC, fan-out; LCOM4 diferido)
+- ✅ F2.5 Cyclomatic complexity (McCabe sobre AST, dos niveles warn/critical)
+- ✅ F2.6 Pydantic `Finding` + `AnalysisReport` (sort, severity counts, JSON)
+- ✅ Universal analyzer orchestrator + 10-violation bench fixture (10/10 detectados)
+- ✅ ADR-0001 documenta decisiones técnicas
+
+**Estado engine**: 60 tests passing · coverage 82.93% · mypy strict clean · ruff clean.
 
 #### H3 — Primer Rule Pack (Hexagonal) + RAG ⏳
 

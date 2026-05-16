@@ -24,6 +24,7 @@ dev-dependencies = [
     "hypothesis>=6.112.0",
     "types-jsonschema>=4.23.0",
     "types-pyyaml>=6.0.12",
+    "types-networkx>=3.4.0",
 ]
 
 [tool.ruff]
@@ -50,7 +51,8 @@ ignore = [
 ]
 
 [tool.ruff.lint.per-file-ignores]
-"**/tests/**" = ["S101", "S105", "S106"]
+"**/tests/**" = ["S101", "S105", "S106", "S603", "S607"]
+"**/tests/fixtures/**" = ["S101", "S105", "S106", "S603", "S607", "SIM103", "PLR2004", "N999"]
 
 [tool.ruff.format]
 quote-style = "double"
