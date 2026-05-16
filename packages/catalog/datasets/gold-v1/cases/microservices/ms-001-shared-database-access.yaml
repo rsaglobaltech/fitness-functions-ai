@@ -1,0 +1,30 @@
+id: ms-001-shared-database-access
+style: microservices
+language: python
+label: violation
+rule_id: shared_database_access
+severity: critical
+code:
+  - path: services/billing/src/billing/repositories/customer_repo.py
+    content: |
+      import psycopg
+
+      # Billing service reaching directly into the customers service DB.
+      CUSTOMERS_DSN = "postgresql://billing_app@customers-db:5432/customers"
+
+      def get_customer_email(customer_id: str) -> str | None:
+          with psycopg.connect(CUSTOMERS_DSN) as conn:
+              row = conn.execute(
+                  "SELECT email FROM customers WHERE id = %s",
+                  (customer_id,),
+              ).fetchone()
+              return row[0] if row else None
+rationale: |
+  Sharing the customers database from the billing service breaks bounded
+  context isolation: any schema change in customers can silently break
+  billing. Communication must go through the customers service API (sync
+  HTTP / RPC) or an event bus.
+source:
+  origin: synthetic
+tags: [shared_database, cross_service, anti_pattern]
+added_at: "2026-05-16"

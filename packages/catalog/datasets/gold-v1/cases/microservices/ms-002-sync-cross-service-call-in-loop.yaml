@@ -1,0 +1,30 @@
+id: ms-002-sync-cross-service-call-in-loop
+style: microservices
+language: typescript
+label: violation
+rule_id: sync_cross_service_call
+severity: warning
+code:
+  - path: services/orders/src/handlers/list_orders.ts
+    content: |
+      import axios from "axios";
+
+      export async function listOrdersWithCustomers(): Promise<unknown[]> {
+        const orders = await fetchOrders();
+        const enriched = [];
+        for (const order of orders) {
+          const customer = await axios.get(
+            `http://user-service/api/customers/${order.customerId}`,
+          );
+          enriched.push({ ...order, customer: customer.data });
+        }
+        return enriched;
+      }
+rationale: |
+  N+1 synchronous calls to another service inside a loop produce latency
+  fan-out and brittle coupling. Either batch the call (`/customers?ids=...`),
+  consume a denormalized read model populated via events, or cache locally.
+source:
+  origin: synthetic
+tags: [n_plus_1, sync_call, latency]
+added_at: "2026-05-16"

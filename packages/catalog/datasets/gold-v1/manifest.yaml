@@ -1,0 +1,30 @@
+dataset: gold-v1
+description: |
+  Initial gold dataset for the architectural guardian. Cases are hand-curated
+  and grouped by architectural style. Used for model selection (H1), detector
+  regression (H2-H4), and prompt evaluation in CI (Promptfoo).
+version: "0.1.0"
+created: "2026-05-16"
+maintainers: ["@arch-team"]
+schema: schema/case.schema.yaml
+
+stats:
+  total_cases: 18
+  by_style:
+    hexagonal: 5
+    mvc: 4
+    microservices: 4
+    universal: 5
+  by_label:
+    violation: 13
+    clean: 4
+    ambiguous: 1
+  by_language:
+    typescript: 6
+    python: 8
+    java: 2
+    ruby: 2
+
+acceptance_thresholds:
+  precision_min: 0.85
+  fp_rate_max: 0.15

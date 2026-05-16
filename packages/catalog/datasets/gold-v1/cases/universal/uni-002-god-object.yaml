@@ -1,0 +1,48 @@
+id: uni-002-god-object
+style: universal
+language: java
+label: violation
+rule_id: god_object
+severity: warning
+code:
+  - path: src/main/java/com/example/OrderManager.java
+    content: |
+      package com.example;
+
+      public class OrderManager {
+          public void createOrder() { /* ... */ }
+          public void updateOrder() { /* ... */ }
+          public void deleteOrder() { /* ... */ }
+          public void cancelOrder() { /* ... */ }
+          public void shipOrder() { /* ... */ }
+          public void invoiceOrder() { /* ... */ }
+          public void refundOrder() { /* ... */ }
+          public void notifyCustomer() { /* ... */ }
+          public void notifyWarehouse() { /* ... */ }
+          public void notifyAccounting() { /* ... */ }
+          public void exportToCSV() { /* ... */ }
+          public void exportToPDF() { /* ... */ }
+          public void exportToXML() { /* ... */ }
+          public void exportToJSON() { /* ... */ }
+          public void importFromCSV() { /* ... */ }
+          public void importFromXML() { /* ... */ }
+          public void validateOrder() { /* ... */ }
+          public void recalculateTotals() { /* ... */ }
+          public void applyDiscount() { /* ... */ }
+          public void applyCoupon() { /* ... */ }
+          public void calculateTax() { /* ... */ }
+          public void calculateShipping() { /* ... */ }
+          public void rateLimit() { /* ... */ }
+          public void audit() { /* ... */ }
+          public void monitor() { /* ... */ }
+          public void backup() { /* ... */ }
+      }
+rationale: |
+  Twenty-six public methods spanning persistence, notifications, exports,
+  pricing, monitoring, and backups. Classic God Object. Split by
+  responsibility — at minimum: OrderRepository, OrderShipping, OrderInvoicing,
+  OrderNotifications, OrderExporters.
+source:
+  origin: synthetic
+tags: [god_object, srp_violation, refactor]
+added_at: "2026-05-16"

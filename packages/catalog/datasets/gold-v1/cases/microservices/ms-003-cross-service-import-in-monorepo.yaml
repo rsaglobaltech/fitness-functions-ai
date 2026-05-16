@@ -1,0 +1,24 @@
+id: ms-003-cross-service-import-in-monorepo
+style: microservices
+language: typescript
+label: violation
+rule_id: cross_service_import
+severity: critical
+code:
+  - path: services/orders/src/handlers/create_order.ts
+    content: |
+      import { computeLoyaltyTier } from "../../../users/src/domain/loyalty";
+
+      export function createOrder(userId: string): void {
+        const tier = computeLoyaltyTier(userId);
+        // ...
+      }
+rationale: |
+  In a polyrepo-modeled monorepo, services must not import each other's
+  internals directly. This breaks deployability: changes in `users` could
+  force a redeploy of `orders`. Expose the function as a service API or
+  publish a shared, versioned package consumed via the workspace registry.
+source:
+  origin: synthetic
+tags: [monorepo, cross_service_import, deployability]
+added_at: "2026-05-16"

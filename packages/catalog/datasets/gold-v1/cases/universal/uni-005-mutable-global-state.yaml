@@ -1,0 +1,24 @@
+id: uni-005-mutable-global-state
+style: universal
+language: python
+label: violation
+rule_id: mutable_global_state
+severity: warning
+code:
+  - path: src/cache/inventory_cache.py
+    content: |
+      INVENTORY: dict[str, int] = {}
+
+      def set_stock(sku: str, qty: int) -> None:
+          INVENTORY[sku] = qty
+
+      def get_stock(sku: str) -> int:
+          return INVENTORY.get(sku, 0)
+rationale: |
+  Module-level mutable state shared across callers. Not thread-safe, hard
+  to test in isolation, hidden coupling between modules that import it.
+  Wrap behind a class or pass an explicit dependency.
+source:
+  origin: synthetic
+tags: [global_state, thread_safety]
+added_at: "2026-05-16"

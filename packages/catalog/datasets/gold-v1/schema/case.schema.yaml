@@ -1,0 +1,79 @@
+# JSON Schema (YAML serialized) for gold dataset cases.
+$schema: "https://json-schema.org/draft/2020-12/schema"
+$id: "https://arch-guardian.dev/schemas/gold-case-v1.yaml"
+title: Gold Dataset Case
+type: object
+additionalProperties: false
+required: [id, style, language, label, code, rationale, source]
+properties:
+  id:
+    type: string
+    pattern: "^[a-z0-9][a-z0-9_-]{2,63}$"
+    description: Stable, kebab/snake-case identifier.
+  style:
+    type: string
+    enum:
+      - hexagonal
+      - mvc
+      - microservices
+      - modular_monolith
+      - feature_sliced_design
+      - vertical_slice
+      - event_driven_cqrs
+      - universal
+  language:
+    type: string
+    enum: [python, typescript, javascript, java, csharp, kotlin, go, ruby]
+  label:
+    type: string
+    enum: [violation, clean, ambiguous]
+  rule_id:
+    type: string
+    description: Required when label == violation.
+  severity:
+    type: string
+    enum: [critical, warning, suggestion]
+    description: Expected severity (only meaningful for violations).
+  code:
+    type: array
+    minItems: 1
+    items:
+      type: object
+      additionalProperties: false
+      required: [path, content]
+      properties:
+        path:
+          type: string
+          minLength: 1
+        content:
+          type: string
+          minLength: 1
+  rationale:
+    type: string
+    minLength: 10
+    description: Human-curated reasoning behind the label.
+  source:
+    type: object
+    additionalProperties: false
+    required: [origin]
+    properties:
+      origin:
+        type: string
+        enum: [synthetic, internal_repo, public_repo, anonymized]
+      reference:
+        type: string
+        description: PR URL, commit hash, or short citation when applicable.
+  tags:
+    type: array
+    items:
+      type: string
+  added_at:
+    type: string
+    format: date
+allOf:
+  - if:
+      properties:
+        label:
+          const: violation
+    then:
+      required: [rule_id, severity]

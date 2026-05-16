@@ -1,0 +1,22 @@
+id: hex-004-port-without-adapter
+style: hexagonal
+language: java
+label: violation
+rule_id: port_without_adapter
+severity: warning
+code:
+  - path: src/main/java/com/example/domain/ports/InventoryGateway.java
+    content: |
+      package com.example.domain.ports;
+
+      public interface InventoryGateway {
+          int currentStock(String sku);
+      }
+rationale: |
+  A port declared in the domain has no concrete adapter in the infrastructure
+  module. Either the port is dead code (delete it) or an implementation is
+  missing. Either way, the system as shipped cannot wire the dependency.
+source:
+  origin: synthetic
+tags: [port_without_adapter, dead_code]
+added_at: "2026-05-16"

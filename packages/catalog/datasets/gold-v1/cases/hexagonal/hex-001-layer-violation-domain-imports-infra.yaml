@@ -1,0 +1,28 @@
+id: hex-001-layer-violation-domain-imports-infra
+style: hexagonal
+language: typescript
+label: violation
+rule_id: layer_violation
+severity: critical
+code:
+  - path: src/domain/Order.ts
+    content: |
+      import { PrismaClient } from "@prisma/client";
+
+      export class Order {
+        constructor(public readonly id: string) {}
+
+        async persist(): Promise<void> {
+          const db = new PrismaClient();
+          await db.order.create({ data: { id: this.id } });
+        }
+      }
+rationale: |
+  The domain layer must not depend on infrastructure. Importing PrismaClient
+  directly from the domain entity inverts the dependency rule of Hexagonal /
+  Clean Architecture. The fix is to depend on an `OrderRepository` port and
+  inject the Prisma-backed adapter from infrastructure.
+source:
+  origin: synthetic
+tags: [layer_violation, dependency_direction, prisma]
+added_at: "2026-05-16"
