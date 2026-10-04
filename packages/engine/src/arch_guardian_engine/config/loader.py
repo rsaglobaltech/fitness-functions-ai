@@ -25,12 +25,10 @@ from arch_guardian_engine.logging import get_logger
 
 _log = get_logger(__name__)
 
-# Resolve catalog schema relative to this file. Layout:
-#   packages/engine/src/arch_guardian_engine/config/loader.py  (this file)
-#   packages/catalog/schema/architecture_yaml_v1.json          (target)
-DEFAULT_SCHEMA_PATH = (
-    Path(__file__).resolve().parents[4] / "catalog" / "schema" / "architecture_yaml_v1.json"
-)
+# The schema ships inside the package so installed copies (wheel, Docker,
+# GitHub Action) can validate. Its source of truth is
+# packages/catalog/schema/architecture_yaml_v1.json; a test keeps both identical.
+DEFAULT_SCHEMA_PATH = Path(__file__).resolve().parents[1] / "schema" / "architecture_yaml_v1.json"
 
 
 class ConfigError(ValueError):
@@ -138,6 +136,7 @@ class ArchitectureProfile(BaseModel):
     layout: dict[str, Any] = Field(default_factory=dict)
     universal_rules: UniversalRules = Field(default_factory=UniversalRules)
     knowledge_base: KnowledgeBase = Field(default_factory=KnowledgeBase)
+    exclude: tuple[str, ...] = ()  # globs never analysed
     exceptions: tuple[ExceptionRule, ...] = ()
 
 

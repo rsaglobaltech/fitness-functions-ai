@@ -14,6 +14,7 @@ from typing import Any
 from arch_guardian_engine import __version__
 from arch_guardian_engine.config import Severity
 from arch_guardian_engine.findings import AnalysisReport, Finding
+from arch_guardian_engine.paths import repo_uri
 
 _LEVEL = {
     Severity.CRITICAL: "error",
@@ -23,11 +24,6 @@ _LEVEL = {
 }
 _FINGERPRINT_KEY = "archGuardian/v1"
 _INFO_URI = "https://github.com/rsaglobaltech/fitness-functions-ai"
-
-
-def _uri(prefix: str, file: str) -> str:
-    prefix = prefix.strip("/")
-    return f"{prefix}/{file}" if prefix and prefix != "." else file
 
 
 def _rule(f: Finding) -> dict[str, Any]:
@@ -45,7 +41,7 @@ def _rule(f: Finding) -> dict[str, Any]:
 
 def _result(f: Finding, rule_index: int, prefix: str) -> dict[str, Any]:
     physical: dict[str, Any] = {
-        "artifactLocation": {"uri": _uri(prefix, f.location.file), "uriBaseId": "%SRCROOT%"}
+        "artifactLocation": {"uri": repo_uri(prefix, f.location.file), "uriBaseId": "%SRCROOT%"}
     }
     if f.location.line:
         region: dict[str, int] = {"startLine": f.location.line}

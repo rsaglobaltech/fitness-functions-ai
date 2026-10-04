@@ -65,6 +65,27 @@ def _path_prefix(path: Path) -> str:
         return ""
 
 
+def _write(target: Path, content: str) -> None:
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(content, encoding="utf-8")
+
+
+def _parse_reports(specs: list[str]) -> list[tuple[OutputFormat, Path]]:
+    parsed: list[tuple[OutputFormat, Path]] = []
+    valid = ", ".join(f.value for f in OutputFormat)
+    for spec in specs:
+        fmt, sep, target = spec.partition(":")
+        if not sep or not target:
+            raise typer.BadParameter(f"expected FORMAT:PATH, got {spec!r}", param_hint="--report")
+        try:
+            parsed.append((OutputFormat(fmt), Path(target)))
+        except ValueError as exc:
+            raise typer.BadParameter(
+                f"unknown format {fmt!r} (valid: {valid})", param_hint="--report"
+            ) from exc
+    return parsed
+
+
 def exit_code_for(report: AnalysisReport, fail_on: FailOn) -> int:
     blocking = _THRESHOLD[fail_on]
     return EXIT_FINDINGS if any(f.severity in blocking for f in report.findings) else EXIT_OK
@@ -93,6 +114,14 @@ def analyze(
         Path | None,
         typer.Option("--output", "-o", dir_okay=False, help="Write report here instead of stdout."),
     ] = None,
+    extra_reports: Annotated[
+        list[str] | None,
+        typer.Option(
+            "--report",
+            help="Extra report from the same run, as FORMAT:PATH (repeatable), "
+            "e.g. --report sarif:guardian.sarif --report text:summary.txt",
+        ),
+    ] = None,
     fail_on: Annotated[
         FailOn, typer.Option(help="Lowest severity that makes the command exit 1.")
     ] = FailOn.CRITICAL,
@@ -106,6 +135,7 @@ def analyze(
     """Analyse a repository and report architectural findings."""
     configure_logging(level="INFO" if verbose else "WARNING", json_logs=log_json)
     log = get_logger("arch_guardian_engine.cli")
+    extras = _parse_reports(extra_reports or [])
 
     try:
         report = analyze_changes(ChangeAnalysisRequest(path=path, base=base, head=head))
@@ -117,12 +147,14 @@ def analyze(
         _err(f"internal error: {exc!r}")
         raise typer.Exit(EXIT_INTERNAL) from exc
 
-    rendered = render(report, output_format, path_prefix=_path_prefix(path))
+    prefix = _path_prefix(path)
+    rendered = render(report, output_format, path_prefix=prefix)
     if output is None:
         sys.stdout.write(rendered)
     else:
-        output.parent.mkdir(parents=True, exist_ok=True)
-        output.write_text(rendered, encoding="utf-8")
+        _write(output, rendered)
+    for fmt, target in extras:
+        _write(target, render(report, fmt, path_prefix=prefix))
 
     if report.config_error and not allow_invalid_config:
         _err(

@@ -13,7 +13,7 @@ from datetime import date
 from pathlib import Path
 from time import perf_counter
 
-from arch_guardian_engine.ast_analyzer import analyze_repo
+from arch_guardian_engine.ast_analyzer import RepoAnalysis, analyze_repo
 from arch_guardian_engine.config import (
     ArchitectureProfile,
     ConfigError,
@@ -58,54 +58,18 @@ class RepositoryAnalyzer:
         profile = self.profile or resolved.profile
         config_error = resolved.config_error if self.profile is None else None
         rules = self.rules or (profile.universal_rules if profile else UniversalRules())
-        ast = analyze_repo(root)
+        ast = analyze_repo(root, exclude=profile.exclude if profile else ())
 
-        findings: list[Finding] = []
-        if rules.circular_dependencies is not Severity.OFF:
-            findings.extend(detect_circular_dependencies(ast, severity=rules.circular_dependencies))
-        if rules.god_object_threshold.severity is not Severity.OFF:
-            findings.extend(
-                detect_god_objects(
-                    ast,
-                    severity=rules.god_object_threshold.severity,
-                    max_methods=rules.god_object_threshold.max_methods,
-                    max_loc=rules.god_object_threshold.max_loc,
-                )
-            )
-        if rules.cyclomatic_complexity.severity is not Severity.OFF:
-            findings.extend(
-                detect_cyclomatic_complexity(
-                    ast,
-                    warn_threshold=rules.cyclomatic_complexity.max_per_function,
-                    error_threshold=rules.cyclomatic_complexity.max_per_function * 2,
-                    warn_severity=rules.cyclomatic_complexity.severity,
-                )
-            )
-
+        findings = _universal_findings(ast, rules)
         rule_pack = None
         if profile is not None:
             rule_pack = (
                 f"{profile.architecture.style.value}@{profile.architecture.rule_pack_version}"
             )
             try:
-                layers = parse_layers(profile.architecture.style, profile.layout)
+                findings.extend(_style_findings(ast, profile, rule_pack))
             except ConfigError as exc:
                 config_error = config_error or str(exc)
-                layers = None
-            if layers:
-                findings.extend(
-                    detect_layer_violations(
-                        ast,
-                        layers,
-                        style=profile.architecture.style,
-                        severity=(
-                            Severity.CRITICAL
-                            if profile.architecture.strict_mode
-                            else Severity.WARNING
-                        ),
-                        rule_pack=rule_pack,
-                    )
-                )
 
         exceptions = profile.exceptions if profile and self.apply_exceptions else ()
         suppression = apply_exceptions(findings, exceptions, today=self.today)
@@ -125,7 +89,7 @@ class RepositoryAnalyzer:
         ).sorted()
 
         _log.info(
-            "universal_analysis_completed",
+            "analysis_completed",
             repo=str(root),
             modules=len(ast.modules),
             findings=len(report.findings),
@@ -134,3 +98,41 @@ class RepositoryAnalyzer:
             by_severity={k.value: v for k, v in report.by_severity.items()},
         )
         return report
+
+
+def _universal_findings(ast: RepoAnalysis, rules: UniversalRules) -> list[Finding]:
+    """Language-agnostic detectors; a rule set to `off` does not run."""
+    findings: list[Finding] = []
+    if rules.circular_dependencies is not Severity.OFF:
+        findings.extend(detect_circular_dependencies(ast, severity=rules.circular_dependencies))
+    god = rules.god_object_threshold
+    if god.severity is not Severity.OFF:
+        findings.extend(
+            detect_god_objects(
+                ast, severity=god.severity, max_methods=god.max_methods, max_loc=god.max_loc
+            )
+        )
+    cc = rules.cyclomatic_complexity
+    if cc.severity is not Severity.OFF:
+        findings.extend(
+            detect_cyclomatic_complexity(
+                ast,
+                warn_threshold=cc.max_per_function,
+                error_threshold=cc.max_per_function * 2,
+                warn_severity=cc.severity,
+            )
+        )
+    return findings
+
+
+def _style_findings(
+    ast: RepoAnalysis, profile: ArchitectureProfile, rule_pack: str
+) -> list[Finding]:
+    """Rules declared in `layout`. Raises ConfigError on a malformed layout."""
+    layers = parse_layers(profile.architecture.style, profile.layout)
+    if not layers:
+        return []
+    severity = Severity.CRITICAL if profile.architecture.strict_mode else Severity.WARNING
+    return detect_layer_violations(
+        ast, layers, style=profile.architecture.style, severity=severity, rule_pack=rule_pack
+    )

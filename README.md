@@ -25,15 +25,45 @@ uv run guardian analyze . --base origin/main -f sarif -o guardian.sarif
 
 | Opción | Valores | Default |
 |---|---|---|
-| `--format/-f` | `text`, `json`, `sarif` | `text` |
+| `--format/-f` | `text`, `json`, `sarif`, `github` (anotaciones) | `text` |
 | `--fail-on` | `critical`, `warning`, `suggestion`, `never` | `critical` |
 | `--base` | ref git; reporta solo hallazgos nuevos desde el merge-base | — |
 | `--head` | ref a analizar; `HEAD` usa el working tree tal cual | `HEAD` |
+| `--report` | `FORMAT:PATH` extra de la misma corrida (repetible) | — |
 | `--allow-invalid-config` | no falla si `.architecture.yaml` es inválido | off |
 
 Códigos de salida: `0` sin hallazgos bloqueantes · `1` hallazgos ≥ `--fail-on` · `2` error de uso/configuración/git · `3` error interno.
 
 En CI, el modo `--base` necesita historial completo (`actions/checkout` con `fetch-depth: 0`). Los logs van a stderr; stdout queda limpio para JSON/SARIF.
+
+## GitHub Action
+
+```yaml
+# .github/workflows/architecture.yml
+on: pull_request
+permissions:
+  contents: read
+  # security-events: write   # solo si upload-sarif: true
+jobs:
+  guardian:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0          # obligatorio: compara contra el merge-base
+      - uses: rsaglobaltech/fitness-functions-ai@v0   # fijar a un tag o SHA
+        with:
+          fail-on: critical       # critical | warning | suggestion | never
+          upload-sarif: "false"   # "true" → GitHub code scanning (GHAS en repos privados)
+```
+
+- En `pull_request` compara automáticamente contra `origin/<rama base>`: solo reporta lo que el PR introduce.
+- Hallazgos como anotaciones inline en el PR (sin GHAS) + resumen en la pestaña del job.
+- Outputs: `exit-code`, `sarif-file`. Clon superficial → error explícito, no un falso verde.
+
+## Configuración adicional
+
+- `exclude: ["generated/**", "**/fixtures/**"]` — paths que nunca se analizan.
 
 ## Reglas de capas (`layout.layers`)
 

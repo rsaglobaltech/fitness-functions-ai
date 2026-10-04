@@ -120,3 +120,13 @@ def test_load_profile_invalid_yaml(tmp_path: Path) -> None:
     p.write_text(":\n :\n", encoding="utf-8")
     with pytest.raises(ConfigError):
         load_profile(p)
+
+
+@pytest.mark.unit
+def test_packaged_schema_matches_catalog_source() -> None:
+    from arch_guardian_engine.config import DEFAULT_SCHEMA_PATH
+
+    catalog = Path(__file__).resolve().parents[3] / "catalog" / "schema" / DEFAULT_SCHEMA_PATH.name
+    assert DEFAULT_SCHEMA_PATH.read_bytes() == catalog.read_bytes(), (
+        "packaged schema drifted from packages/catalog/schema; copy the catalog file over"
+    )

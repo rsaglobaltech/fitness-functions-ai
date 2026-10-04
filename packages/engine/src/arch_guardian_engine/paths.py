@@ -58,3 +58,9 @@ def matches_glob(path: str | Path, pattern: str) -> bool:
 
 def matches_any(path: str | Path, patterns: tuple[str, ...] | list[str]) -> bool:
     return any(matches_glob(path, p) for p in patterns)
+
+
+def repo_uri(prefix: str, file: str) -> str:
+    """Join an analysed-root-relative `file` onto the root's repo-relative `prefix`."""
+    prefix = prefix.strip("/")
+    return f"{prefix}/{file}" if prefix and prefix != "." else file

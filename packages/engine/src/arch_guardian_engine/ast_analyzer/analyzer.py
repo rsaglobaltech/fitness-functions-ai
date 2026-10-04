@@ -29,6 +29,7 @@ from tree_sitter import Language as TSLanguage
 from tree_sitter import Node, Parser, Tree
 
 from arch_guardian_engine.logging import get_logger
+from arch_guardian_engine.paths import matches_any, matches_glob
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -620,13 +621,20 @@ DEFAULT_MAX_FILE_BYTES = 1_000_000  # bigger files are generated / vendored in p
 _SKIP_SUFFIXES = (".min.js", ".bundle.js", ".d.ts")
 
 
-def _iter_source_files(root: Path, max_file_bytes: int) -> Iterator[Path]:
+def _iter_source_files(root: Path, max_file_bytes: int, exclude: tuple[str, ...]) -> Iterator[Path]:
     """Yield supported source files, pruning skip-dirs instead of descending them."""
     for dirpath, dirnames, filenames in os.walk(root, followlinks=False):
-        dirnames[:] = sorted(d for d in dirnames if d not in _SKIP_DIRS)
+        rel_dir = Path(dirpath).relative_to(root)
+        dirnames[:] = sorted(
+            d
+            for d in dirnames
+            if d not in _SKIP_DIRS and not _dir_excluded((rel_dir / d).as_posix(), exclude)
+        )
         for name in sorted(filenames):
             p = Path(dirpath) / name
             if p.suffix.lower() not in _EXTS or name.lower().endswith(_SKIP_SUFFIXES):
+                continue
+            if exclude and matches_any((rel_dir / name).as_posix(), exclude):
                 continue
             if p.is_symlink():
                 continue
@@ -640,19 +648,31 @@ def _iter_source_files(root: Path, max_file_bytes: int) -> Iterator[Path]:
             yield p
 
 
+def _dir_excluded(rel_dir: str, exclude: tuple[str, ...]) -> bool:
+    # `fixtures/**` must prune the `fixtures` dir itself, not only its files.
+    return any(
+        matches_glob(rel_dir, p) or (p.endswith("/**") and matches_glob(rel_dir, p[:-3]))
+        for p in exclude
+    )
+
+
 def analyze_repo(
     root: str | Path,
     *,
     max_file_bytes: int = DEFAULT_MAX_FILE_BYTES,
+    exclude: tuple[str, ...] = (),
 ) -> RepoAnalysis:
-    """Walk a repository and produce per-file modules + the global import graph."""
+    """Walk a repository and produce per-file modules + the global import graph.
+
+    `exclude` holds repo-relative globs (see `arch_guardian_engine.paths`).
+    """
     repo_root = Path(root).resolve()
     if not repo_root.is_dir():
         raise FileNotFoundError(f"not a directory: {repo_root}")
 
     analysis = RepoAnalysis(root=repo_root)
 
-    for path in _iter_source_files(repo_root, max_file_bytes):
+    for path in _iter_source_files(repo_root, max_file_bytes, exclude):
         try:
             module = analyze_file(path, root=repo_root)
         except Exception as exc:

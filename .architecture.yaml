@@ -1,0 +1,57 @@
+# arch-guardian applied to its own code (dogfooding).
+schema_version: "1.0"
+
+project:
+  name: fitness-functions-ai
+  language: python
+  runtime: python3.12
+
+architecture:
+  style: layered
+  rule_pack_version: "1.0.0"
+  strict_mode: true
+
+# Test fixtures contain *planted* violations on purpose.
+exclude:
+  - "packages/engine/tests/**"
+
+layout:
+  layers:
+    # Pure building blocks: no knowledge of how analysis is orchestrated.
+    core:
+      paths:
+        - "packages/engine/src/arch_guardian_engine/__init__.py"
+        - "packages/engine/src/arch_guardian_engine/config/**"
+        - "packages/engine/src/arch_guardian_engine/findings/**"
+        - "packages/engine/src/arch_guardian_engine/paths.py"
+        - "packages/engine/src/arch_guardian_engine/logging.py"
+        - "packages/engine/src/arch_guardian_engine/settings.py"
+      can_depend_on: []
+      forbidden_imports: ["typer", "anthropic", "langfuse"]
+    analysis:
+      paths:
+        - "packages/engine/src/arch_guardian_engine/ast_analyzer/**"
+        - "packages/engine/src/arch_guardian_engine/detectors/**"
+        - "packages/engine/src/arch_guardian_engine/rules/**"
+        - "packages/engine/src/arch_guardian_engine/style_detector/**"
+        - "packages/engine/src/arch_guardian_engine/resolver/**"
+        - "packages/engine/src/arch_guardian_engine/diff/**"
+      can_depend_on: ["core"]
+      forbidden_imports: ["typer", "anthropic", "langfuse"]
+    integrations:
+      paths:
+        - "packages/engine/src/arch_guardian_engine/llm/**"
+        - "packages/engine/src/arch_guardian_engine/observability/**"
+        - "packages/engine/src/arch_guardian_engine/gold_dataset/**"
+      can_depend_on: ["core"]
+    application:
+      paths:
+        - "packages/engine/src/arch_guardian_engine/analyzer/**"
+      can_depend_on: ["core", "analysis", "integrations"]
+      forbidden_imports: ["typer"]
+    interface:
+      paths:
+        - "packages/engine/src/arch_guardian_engine/cli.py"
+        - "packages/engine/src/arch_guardian_engine/__main__.py"
+        - "packages/engine/src/arch_guardian_engine/report/**"
+      can_depend_on: ["core", "analysis", "application"]
