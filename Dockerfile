@@ -35,9 +35,13 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 # git is required for --base (merge-base + temporary worktrees).
 # safe.directory: mounted repositories are owned by another UID; without this
 # git refuses to operate on them ("detected dubious ownership").
+# pip is removed: the tool never installs anything at runtime, and an unused
+# package manager is just attack surface.
 RUN apt-get update \
+    && apt-get upgrade -y \
     && apt-get install -y --no-install-recommends git ca-certificates \
     && rm -rf /var/lib/apt/lists/* \
+    && python -m pip uninstall -y pip \
     && git config --system --add safe.directory '*' \
     && groupadd --system guardian \
     && useradd --system --gid guardian --create-home --home-dir /home/guardian guardian

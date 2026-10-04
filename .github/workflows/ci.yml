@@ -110,4 +110,25 @@ jobs:
           image-ref: arch-guardian:ci
           severity: CRITICAL,HIGH
           ignore-unfixed: true
-          exit-code: "1"
+          format: json
+          output: trivy.json
+          exit-code: "0"
+      - name: Report vulnerabilities as annotations
+        # Annotations are readable without repo access to job logs.
+        run: |
+          python3 - <<'PY'
+          import json, sys
+          vulns = [
+              (r.get("Target", "?"), v)
+              for r in json.load(open("trivy.json")).get("Results", [])
+              for v in r.get("Vulnerabilities") or []
+          ]
+          for target, v in vulns:
+              print(
+                  f"::error title=Trivy {v['Severity']} {v['VulnerabilityID']}::"
+                  f"{v['PkgName']} {v.get('InstalledVersion', '?')} -> "
+                  f"{v.get('FixedVersion', '?')} ({target})"
+              )
+          print(f"{len(vulns)} fixable CRITICAL/HIGH vulnerabilities")
+          sys.exit(1 if vulns else 0)
+          PY
