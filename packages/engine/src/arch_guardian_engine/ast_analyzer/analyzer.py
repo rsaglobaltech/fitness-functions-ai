@@ -186,10 +186,23 @@ class Module:
 
 @dataclass
 class RepoAnalysis:
+    """Parsed modules plus their dependencies.
+
+    `import_graph` edges carry a `lines` attribute: the source lines (in the
+    importing module) of every import producing that edge. Imports that do not
+    resolve to a repo module are kept in `external_imports` (third-party or
+    stdlib), which layer rules use to forbid e.g. ORMs inside the domain.
+    """
+
     root: Path
     modules: dict[str, Module] = field(default_factory=dict)
     import_graph: nx.DiGraph[str] = field(default_factory=nx.DiGraph)
+    external_imports: dict[str, list[Import]] = field(default_factory=dict)
     skipped: list[Path] = field(default_factory=list)
+
+    def rel_path(self, module_id: str) -> str:
+        """POSIX path of a module relative to the repo root."""
+        return self.modules[module_id].path.relative_to(self.root).as_posix()
 
 
 # ---------------------------------------------------------------------------
@@ -657,9 +670,16 @@ def analyze_repo(
     for module in analysis.modules.values():
         for imp in module.imports:
             target = resolver.resolve(module, imp.target)
-            if target is None or target == module.module_id:
+            if target is None:
+                analysis.external_imports.setdefault(module.module_id, []).append(imp)
                 continue
-            analysis.import_graph.add_edge(module.module_id, target)
+            if target == module.module_id:
+                continue
+            graph = analysis.import_graph
+            if graph.has_edge(module.module_id, target):
+                graph.edges[module.module_id, target]["lines"].append(imp.line)
+            else:
+                graph.add_edge(module.module_id, target, lines=[imp.line])
 
     _log.info(
         "repo_analyzed",

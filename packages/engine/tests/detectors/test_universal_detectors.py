@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-from arch_guardian_engine.analyzer import UniversalAnalyzer
+from arch_guardian_engine.analyzer import RepositoryAnalyzer
 from arch_guardian_engine.ast_analyzer import analyze_repo
 from arch_guardian_engine.config import (
     CyclomaticComplexityRule,
@@ -85,7 +85,7 @@ def test_universal_analyzer_catches_at_least_eight_of_ten() -> None:
             severity=Severity.WARNING, max_per_function=10
         ),
     )
-    report = UniversalAnalyzer(rules=rules).analyze(PLANTED)
+    report = RepositoryAnalyzer(rules=rules).analyze(PLANTED)
     rule_ids = [f.rule_id for f in report.findings]
     cycles = rule_ids.count("universal.circular_dependency")
     god = rule_ids.count("universal.god_object")
@@ -102,7 +102,7 @@ def test_universal_analyzer_returns_sorted_report() -> None:
         cyclomatic_complexity=CyclomaticComplexityRule(max_per_function=10),
         god_object_threshold=GodObjectThreshold(max_methods=25, max_loc=200),
     )
-    report = UniversalAnalyzer(rules=rules).analyze(PLANTED)
+    report = RepositoryAnalyzer(rules=rules).analyze(PLANTED)
     severities = [f.severity for f in report.findings]
     # Critical-severity findings should come first.
     last_critical = max(

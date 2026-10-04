@@ -1,4 +1,4 @@
-"""UniversalAnalyzer honours `.architecture.yaml`: rules, `off`, exceptions."""
+"""RepositoryAnalyzer honours `.architecture.yaml`: rules, `off`, exceptions."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ from datetime import date
 from pathlib import Path
 
 import pytest
-from arch_guardian_engine.analyzer import UniversalAnalyzer
+from arch_guardian_engine.analyzer import RepositoryAnalyzer
 from arch_guardian_engine.config import Severity, UniversalRules
 
 PLANTED = Path(__file__).resolve().parents[1] / "fixtures" / "planted_violations"
@@ -47,7 +47,7 @@ def test_yaml_universal_rules_are_applied(tmp_path: Path) -> None:
         "    max_methods: 5\n"
         "    max_loc: 50\n",
     )
-    report = UniversalAnalyzer().analyze(repo)
+    report = RepositoryAnalyzer().analyze(repo)
     assert "universal.cyclomatic_complexity" not in _rules(report.findings)
     cycles = [f for f in report.findings if f.rule_id == "universal.circular_dependency"]
     gods = [f for f in report.findings if f.rule_id == "universal.god_object"]
@@ -59,7 +59,7 @@ def test_yaml_universal_rules_are_applied(tmp_path: Path) -> None:
 @pytest.mark.unit
 def test_explicit_rules_override_yaml(tmp_path: Path) -> None:
     repo = _repo(tmp_path, 'universal_rules:\n  circular_dependencies: "off"\n')
-    report = UniversalAnalyzer(rules=UniversalRules()).analyze(repo)
+    report = RepositoryAnalyzer(rules=UniversalRules()).analyze(repo)
     assert "universal.circular_dependency" in _rules(report.findings)
 
 
@@ -78,7 +78,7 @@ def test_exceptions_suppress_and_expired_ones_warn(tmp_path: Path) -> None:
         '    reason: "old exception"\n'
         '    expires: "2025-01-01"\n',
     )
-    report = UniversalAnalyzer(today=date(2026, 6, 1)).analyze(repo)
+    report = RepositoryAnalyzer(today=date(2026, 6, 1)).analyze(repo)
 
     files_in_cycles = {
         f.metadata["member_files"]

@@ -35,6 +35,35 @@ Códigos de salida: `0` sin hallazgos bloqueantes · `1` hallazgos ≥ `--fail-o
 
 En CI, el modo `--base` necesita historial completo (`actions/checkout` con `fetch-depth: 0`). Los logs van a stderr; stdout queda limpio para JSON/SARIF.
 
+## Reglas de capas (`layout.layers`)
+
+Deterministas, sin LLM. Aplican a cualquier estilo que declare `layers` (hexagonal, layered, clean…):
+
+```yaml
+architecture:
+  style: hexagonal
+  rule_pack_version: "1.0.0"
+  strict_mode: true          # true → critical (bloquea); false → warning
+layout:
+  layers:
+    domain:
+      paths: ["src/domain/**"]
+      can_depend_on: []
+      forbidden_imports: ["@prisma/*", "sqlalchemy", "express"]   # paquetes externos
+    application:
+      paths: ["src/application/**"]
+      can_depend_on: ["domain"]
+    infrastructure:
+      paths: ["src/infrastructure/**"]
+      can_depend_on: ["domain", "application"]
+```
+
+- Un archivo pertenece a la capa cuyo glob coincidente es más específico.
+- Imports dentro de la misma capa siempre permitidos; archivos fuera de toda capa no se evalúan.
+- Feature-Sliced Design puede usar `layers_order` + `paths`: cada capa solo importa capas inferiores.
+- Hallazgos: `<style>.layer_violation` — silenciables con `exceptions` (`suppress_rules: ["layer_violation"]`).
+- Un `layout` mal formado (capa desconocida en `can_depend_on`, sin `paths`…) termina con exit 2.
+
 ## Documentación
 
 - [Plan de Implementación](./PLAN_IMPLEMENTACION.md) — Roadmap completo por hitos (H0–H7) para MVP en 13 semanas.
