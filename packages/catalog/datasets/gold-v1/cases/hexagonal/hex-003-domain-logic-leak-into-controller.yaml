@@ -1,0 +1,30 @@
+id: hex-003-domain-logic-leak-into-controller
+style: hexagonal
+language: python
+label: violation
+rule_id: domain_logic_leak
+severity: warning
+code:
+  - path: src/presentation/order_controller.py
+    content: |
+      from fastapi import APIRouter
+
+      router = APIRouter()
+
+      @router.post("/orders/{order_id}/discount")
+      def apply_discount(order_id: str, percentage: float) -> dict[str, float]:
+          # Business rule embedded in the controller:
+          if percentage > 30:
+              percentage = 30
+          subtotal = 100.0  # imagine fetched
+          tax_rate = 0.21
+          total = subtotal * (1 - percentage / 100) * (1 + tax_rate)
+          return {"total": total}
+rationale: |
+  The discount cap and tax computation are domain rules and must live in a
+  use-case or domain service, not in the HTTP layer. The controller should
+  only validate input and delegate.
+source:
+  origin: synthetic
+tags: [domain_logic_leak, fastapi, controller]
+added_at: "2026-05-16"

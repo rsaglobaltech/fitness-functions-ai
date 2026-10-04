@@ -1,0 +1,121 @@
+name: arch-guardian
+description: >-
+  Architectural fitness functions on every pull request: dependency cycles,
+  God Objects, complexity and declared layer rules. Reports only what the PR
+  introduces, as inline annotations and (optionally) GitHub code scanning.
+author: rsaglobaltech
+branding:
+  icon: shield
+  color: purple
+
+inputs:
+  path:
+    description: Directory to analyse, relative to the workspace.
+    default: "."
+  base:
+    description: >-
+      Report only findings new since the merge-base with this ref. Defaults to
+      origin/<PR base branch> on pull_request events; empty elsewhere (full scan).
+      Requires actions/checkout with `fetch-depth: 0`.
+    default: ""
+  fail-on:
+    description: Lowest severity that fails the job (critical, warning, suggestion, never).
+    default: critical
+  upload-sarif:
+    description: >-
+      Upload SARIF to GitHub code scanning (needs `security-events: write`; private
+      repositories need GitHub Advanced Security). Annotations work without it.
+    default: "false"
+  sarif-category:
+    description: Code scanning category, to keep several runs apart in one repository.
+    default: arch-guardian
+  python-version:
+    description: Python used to run the engine.
+    default: "3.12"
+
+outputs:
+  exit-code:
+    description: "guardian exit code: 0 ok, 1 findings at/above fail-on, 2 config/git error, 3 internal error."
+    value: ${{ steps.run.outputs.exit-code }}
+  sarif-file:
+    description: Path of the SARIF report.
+    value: ${{ steps.run.outputs.sarif-file }}
+
+runs:
+  using: composite
+  steps:
+    - name: Set up uv
+      uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+      with:
+        enable-cache: false
+
+    - name: Install arch-guardian
+      shell: bash
+      env:
+        UV_PROJECT_ENVIRONMENT: ${{ runner.temp }}/arch-guardian-venv
+        PYTHON_VERSION: ${{ inputs.python-version }}
+      run: |
+        uv sync --frozen --no-dev --no-editable --package arch-guardian-engine \
+          --project "$GITHUB_ACTION_PATH" --python "$PYTHON_VERSION" --quiet
+        echo "$UV_PROJECT_ENVIRONMENT/bin" >> "$GITHUB_PATH"
+
+    - name: Analyse
+      id: run
+      shell: bash
+      # Inputs travel through env vars, never interpolated into the script,
+      # so a crafted ref or path cannot inject shell commands.
+      env:
+        INPUT_PATH: ${{ inputs.path }}
+        INPUT_BASE: ${{ inputs.base }}
+        INPUT_FAIL_ON: ${{ inputs.fail-on }}
+      run: |
+        set +e
+        out="$RUNNER_TEMP/arch-guardian"
+        mkdir -p "$out"
+        base="$INPUT_BASE"
+        if [ -z "$base" ] && [ -n "${GITHUB_BASE_REF:-}" ]; then
+          base="origin/$GITHUB_BASE_REF"
+        fi
+        if [ -n "$base" ] && [ "$(git -C "$INPUT_PATH" rev-parse --is-shallow-repository)" = "true" ]; then
+          echo "::error title=arch-guardian::Shallow clone: set 'fetch-depth: 0' on actions/checkout to compare against $base."
+          echo "exit-code=2" >> "$GITHUB_OUTPUT"
+          exit 0
+        fi
+        args=(analyze "$INPUT_PATH" --format github --fail-on "$INPUT_FAIL_ON"
+              --report "sarif:$out/guardian.sarif" --report "text:$out/summary.txt")
+        if [ -n "$base" ]; then args+=(--base "$base"); fi
+
+        guardian "${args[@]}"
+        code=$?
+
+        {
+          echo "### arch-guardian"
+          if [ -n "$base" ]; then echo "Findings introduced since \`$base\`."; else echo "Full scan."; fi
+          echo '```text'
+          cat "$out/summary.txt" 2>/dev/null || echo "no report produced (exit $code)"
+          echo '```'
+        } >> "$GITHUB_STEP_SUMMARY"
+        echo "exit-code=$code" >> "$GITHUB_OUTPUT"
+        if [ -s "$out/guardian.sarif" ]; then
+          echo "sarif-file=$out/guardian.sarif" >> "$GITHUB_OUTPUT"
+        fi
+        exit 0
+
+    - name: Upload SARIF
+      if: inputs.upload-sarif == 'true' && steps.run.outputs.sarif-file != ''
+      uses: github/codeql-action/upload-sarif@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2 # v4.38.2
+      with:
+        sarif_file: ${{ steps.run.outputs.sarif-file }}
+        category: ${{ inputs.sarif-category }}
+
+    - name: Enforce result
+      shell: bash
+      env:
+        CODE: ${{ steps.run.outputs.exit-code }}
+      run: |
+        case "$CODE" in
+          0) echo "arch-guardian: no blocking findings." ;;
+          1) echo "::error title=arch-guardian::Findings at or above the fail-on threshold."; exit 1 ;;
+          2) echo "::error title=arch-guardian::Configuration or git error (see log above)."; exit 2 ;;
+          *) echo "::error title=arch-guardian::Internal error (exit $CODE)."; exit 1 ;;
+        esac

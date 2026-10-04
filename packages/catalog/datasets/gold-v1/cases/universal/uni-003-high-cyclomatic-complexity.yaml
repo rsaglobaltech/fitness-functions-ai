@@ -1,0 +1,63 @@
+id: uni-003-high-cyclomatic-complexity
+style: universal
+language: python
+label: violation
+rule_id: cyclomatic_complexity
+severity: warning
+code:
+  - path: src/shipping/calculate_rate.py
+    content: |
+      def calculate_rate(weight: float, dest: str, urgent: bool, fragile: bool,
+                         insured: bool, signature: bool, weekend: bool) -> float:
+          rate = 0.0
+          if weight < 1:
+              rate = 5
+          elif weight < 5:
+              rate = 10
+          elif weight < 20:
+              rate = 25
+          else:
+              rate = 50
+
+          if dest == "international":
+              rate *= 3
+          elif dest == "regional":
+              rate *= 1.5
+
+          if urgent:
+              if weight > 10:
+                  rate *= 2.5
+              else:
+                  rate *= 2
+
+          if fragile and not insured:
+              rate += 5
+          elif fragile and insured:
+              rate += 10
+
+          if signature:
+              rate += 3
+
+          if weekend:
+              if dest == "international":
+                  rate += 20
+              elif dest == "regional":
+                  rate += 10
+              else:
+                  rate += 5
+
+          if rate < 5:
+              rate = 5
+          if rate > 500:
+              rate = 500
+
+          return rate
+rationale: |
+  Cyclomatic complexity is well over the 15 threshold (counting branches:
+  ~18). Hard to test, hard to evolve. Refactor into composable rate
+  modifiers (base, distance, urgency, handling, weekend, clamp) — each
+  trivially testable.
+source:
+  origin: synthetic
+tags: [cyclomatic_complexity, refactor]
+added_at: "2026-05-16"

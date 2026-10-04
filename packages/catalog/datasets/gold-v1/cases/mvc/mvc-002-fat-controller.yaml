@@ -1,0 +1,37 @@
+id: mvc-002-fat-controller
+style: mvc
+language: ruby
+label: violation
+rule_id: fat_controller
+severity: warning
+code:
+  - path: app/controllers/orders_controller.rb
+    content: |
+      class OrdersController < ApplicationController
+        def create
+          ActiveRecord::Base.transaction do
+            order = Order.new(order_params)
+            order.subtotal = order.items.sum { |i| i.price * i.qty }
+            order.discount = current_user.premium? ? 0.10 : 0.0
+            order.tax = order.subtotal * 0.21
+            order.total = order.subtotal * (1 - order.discount) + order.tax
+            order.status = order.total > 1000 ? "review" : "confirmed"
+            order.save!
+            MailerService.send_confirmation(order)
+            InventoryService.reserve(order.items)
+            AuditLog.record(current_user, "order.create", order.id)
+          end
+          render json: order
+        rescue ActiveRecord::RecordInvalid => e
+          render json: { error: e.message }, status: :unprocessable_entity
+        end
+      end
+rationale: |
+  The controller orchestrates pricing, status decisions, mailing, inventory
+  reservation, and audit logging. In MVC the controller's job is to receive
+  the request, delegate to a service / interactor / model method, and render.
+  Extract the workflow into an `OrderCreation` service object.
+source:
+  origin: synthetic
+tags: [rails, fat_controller, service_object]
+added_at: "2026-05-16"

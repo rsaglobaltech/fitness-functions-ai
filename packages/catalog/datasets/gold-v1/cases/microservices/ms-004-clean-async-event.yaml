@@ -1,0 +1,32 @@
+id: ms-004-clean-async-event
+style: microservices
+language: typescript
+label: clean
+code:
+  - path: services/orders/src/handlers/order_placed_publisher.ts
+    content: |
+      import type { EventBus } from "../bus";
+
+      export async function publishOrderPlaced(
+        bus: EventBus,
+        payload: { orderId: string; userId: string; totalCents: number },
+      ): Promise<void> {
+        await bus.publish("order.placed.v1", payload);
+      }
+  - path: services/billing/src/handlers/on_order_placed.ts
+    content: |
+      import type { EventEnvelope } from "../bus";
+
+      export async function onOrderPlaced(
+        evt: EventEnvelope<"order.placed.v1", { orderId: string; userId: string; totalCents: number }>,
+      ): Promise<void> {
+        await createInvoice(evt.payload);
+      }
+rationale: |
+  Services communicate through a versioned event contract. Each side
+  consumes only the shared event envelope type; no cross-service runtime
+  import, no shared DB. Versioned event names enable safe evolution.
+source:
+  origin: synthetic
+tags: [event_driven, canonical, versioned_contract]
+added_at: "2026-05-16"

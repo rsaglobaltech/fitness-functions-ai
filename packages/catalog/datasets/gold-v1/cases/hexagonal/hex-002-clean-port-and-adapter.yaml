@@ -1,0 +1,44 @@
+id: hex-002-clean-port-and-adapter
+style: hexagonal
+language: typescript
+label: clean
+code:
+  - path: src/domain/ports/OrderRepository.ts
+    content: |
+      import type { Order } from "../Order";
+
+      export interface OrderRepository {
+        save(order: Order): Promise<void>;
+        findById(id: string): Promise<Order | null>;
+      }
+  - path: src/domain/Order.ts
+    content: |
+      export class Order {
+        constructor(public readonly id: string) {}
+      }
+  - path: src/infrastructure/persistence/PrismaOrderRepository.ts
+    content: |
+      import type { PrismaClient } from "@prisma/client";
+      import type { OrderRepository } from "../../domain/ports/OrderRepository";
+      import { Order } from "../../domain/Order";
+
+      export class PrismaOrderRepository implements OrderRepository {
+        constructor(private readonly prisma: PrismaClient) {}
+
+        async save(order: Order): Promise<void> {
+          await this.prisma.order.create({ data: { id: order.id } });
+        }
+
+        async findById(id: string): Promise<Order | null> {
+          const row = await this.prisma.order.findUnique({ where: { id } });
+          return row ? new Order(row.id) : null;
+        }
+      }
+rationale: |
+  Canonical Hexagonal layout: the domain declares the port, the infrastructure
+  layer provides the adapter. Dependency direction points inward; the domain
+  has zero knowledge of Prisma.
+source:
+  origin: synthetic
+tags: [ports_and_adapters, canonical]
+added_at: "2026-05-16"

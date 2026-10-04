@@ -1,0 +1,20 @@
+id: uni-004-clean-small-function
+style: universal
+language: python
+label: clean
+code:
+  - path: src/billing/discount.py
+    content: |
+      from decimal import Decimal
+
+      def apply_percentage_discount(amount: Decimal, percentage: Decimal) -> Decimal:
+          if percentage < 0 or percentage > 100:
+              raise ValueError("percentage must be in [0, 100]")
+          return amount * (Decimal(1) - percentage / Decimal(100))
+rationale: |
+  Single-purpose, fully typed, explicit validation, no hidden state.
+  Trivial to test. Canonical example of a clean utility function.
+source:
+  origin: synthetic
+tags: [canonical, srp]
+added_at: "2026-05-16"

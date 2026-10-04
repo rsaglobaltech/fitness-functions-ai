@@ -1,0 +1,26 @@
+id: hex-005-application-imports-infra-ambiguous
+style: hexagonal
+language: typescript
+label: ambiguous
+code:
+  - path: src/application/use_cases/SendInvoiceUseCase.ts
+    content: |
+      import { Logger } from "../../infrastructure/logging/Logger";
+
+      export class SendInvoiceUseCase {
+        constructor(private readonly logger: Logger) {}
+
+        async execute(invoiceId: string): Promise<void> {
+          this.logger.info("sending invoice", { invoiceId });
+        }
+      }
+rationale: |
+  The application layer imports a Logger from infrastructure. Whether this is
+  a violation depends on the team's stance: strict Hexagonal requires a
+  LoggerPort in the domain/application boundary; many pragmatic teams allow
+  importing logging utilities as cross-cutting concerns. Mark as ambiguous —
+  the LLM should respect the project's ADR rather than asserting a hard rule.
+source:
+  origin: synthetic
+tags: [cross_cutting, logging, ambiguous]
+added_at: "2026-05-16"

@@ -1,0 +1,24 @@
+id: mvc-001-business-logic-in-view
+style: mvc
+language: python
+label: violation
+rule_id: business_logic_in_view
+severity: warning
+code:
+  - path: app/templates/order_total.html
+    content: |
+      {% set tax_rate = 0.21 %}
+      {% set discount = 0.10 if order.customer.is_premium else 0.0 %}
+      {% set subtotal = 0 %}
+      {% for item in order.items %}
+        {% set subtotal = subtotal + (item.price * item.qty) %}
+      {% endfor %}
+      <p>Total: {{ (subtotal * (1 - discount)) * (1 + tax_rate) }}</p>
+rationale: |
+  Discount eligibility, subtotal, and tax computation are business rules.
+  Templates should display values, not compute them. Move the math into a
+  presenter / view model / model method and pass a single pre-computed total.
+source:
+  origin: synthetic
+tags: [jinja, fat_view, business_logic_in_view]
+added_at: "2026-05-16"

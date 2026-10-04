@@ -1,0 +1,25 @@
+id: mvc-003-model-imports-view
+style: mvc
+language: python
+label: violation
+rule_id: model_imports_view
+severity: critical
+code:
+  - path: app/models/invoice.py
+    content: |
+      from django.db import models
+      from app.views.invoice_view import render_pdf
+
+      class Invoice(models.Model):
+          number = models.CharField(max_length=32)
+
+          def export(self) -> bytes:
+              return render_pdf(self)
+rationale: |
+  Models must not depend on views. The model imports a view function to
+  render itself, which inverts the MVC flow (view depends on model, never
+  the reverse). PDF rendering belongs in a view or a dedicated service.
+source:
+  origin: synthetic
+tags: [django, model_imports_view, layer_violation]
+added_at: "2026-05-16"

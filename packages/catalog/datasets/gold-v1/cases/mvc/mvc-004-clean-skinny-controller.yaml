@@ -1,0 +1,50 @@
+id: mvc-004-clean-skinny-controller
+style: mvc
+language: ruby
+label: clean
+code:
+  - path: app/controllers/orders_controller.rb
+    content: |
+      class OrdersController < ApplicationController
+        def create
+          result = Orders::Create.call(order_params, user: current_user)
+          if result.success?
+            render json: result.order, status: :created
+          else
+            render json: { error: result.error }, status: :unprocessable_entity
+          end
+        end
+      end
+  - path: app/services/orders/create.rb
+    content: |
+      module Orders
+        class Create
+          Result = Struct.new(:success?, :order, :error)
+
+          def self.call(params, user:)
+            new(params, user).call
+          end
+
+          def initialize(params, user)
+            @params = params
+            @user = user
+          end
+
+          def call
+            order = Order.build_for(@user, @params)
+            order.save!
+            OrderConfirmationJob.perform_later(order.id)
+            Result.new(true, order, nil)
+          rescue ActiveRecord::RecordInvalid => e
+            Result.new(false, nil, e.message)
+          end
+        end
+      end
+rationale: |
+  Controller delegates to a service object that returns a result. The
+  controller stays small, easy to read, easy to test, and the business
+  workflow has a clear home.
+source:
+  origin: synthetic
+tags: [rails, service_object, canonical]
+added_at: "2026-05-16"

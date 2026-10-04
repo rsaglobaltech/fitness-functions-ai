@@ -1,0 +1,7 @@
+services:
+  orders:
+    build: ./services/orders
+  billing:
+    build: ./services/billing
+  users:
+    build: ./services/users
