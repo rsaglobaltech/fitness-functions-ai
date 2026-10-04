@@ -51,7 +51,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0          # obligatorio: compara contra el merge-base
-      - uses: rsaglobaltech/fitness-functions-ai@v0   # fijar a un tag o SHA
+      - uses: rsaglobaltech/fitness-functions-ai@v0   # o un SHA para máxima reproducibilidad
         with:
           fail-on: critical       # critical | warning | suggestion | never
           upload-sarif: "false"   # "true" → GitHub code scanning (GHAS en repos privados)
@@ -60,6 +60,20 @@ jobs:
 - En `pull_request` compara automáticamente contra `origin/<rama base>`: solo reporta lo que el PR introduce.
 - Hallazgos como anotaciones inline en el PR (sin GHAS) + resumen en la pestaña del job.
 - Outputs: `exit-code`, `sarif-file`. Clon superficial → error explícito, no un falso verde.
+
+## Docker
+
+```bash
+docker run --rm -v "$PWD:/workspace" ghcr.io/rsaglobaltech/arch-guardian:0 analyze . --base origin/main
+```
+
+Imagen no-root, solo con el venv y `git`; publicada con SBOM y provenance en cada release.
+
+## Releases
+
+1. Subir `__version__` en `packages/engine/src/arch_guardian_engine/__init__.py` (única fuente de versión).
+2. Merge a `main`, luego `git tag vX.Y.Z && git push origin vX.Y.Z`.
+3. El workflow `Release` verifica tag = versión, construye wheel/sdist (con smoke test), publica la imagen en GHCR, crea el GitHub Release y mueve el tag flotante `vX` usado por la Action.
 
 ## Configuración adicional
 
@@ -100,7 +114,7 @@ layout:
 
 ## Estado
 
-En desarrollo activo — Hito H0 (Setup y Fundaciones).
+v0.1 — CLI determinista lista para uso real (reglas universales + capas, modo PR, SARIF, GitHub Action). Capa LLM (H3+) en desarrollo; se instala aparte con el extra `[llm]`.
 
 ## Branching
 

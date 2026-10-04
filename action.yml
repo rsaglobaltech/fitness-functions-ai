@@ -45,7 +45,7 @@ runs:
   using: composite
   steps:
     - name: Set up uv
-      uses: astral-sh/setup-uv@v6
+      uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6.8.0
       with:
         enable-cache: false
 
@@ -103,7 +103,7 @@ runs:
 
     - name: Upload SARIF
       if: inputs.upload-sarif == 'true' && steps.run.outputs.sarif-file != ''
-      uses: github/codeql-action/upload-sarif@v3
+      uses: github/codeql-action/upload-sarif@1190a975f95ce23525efb6a3fc21ea29567c1b52 # v3.38.2
       with:
         sarif_file: ${{ steps.run.outputs.sarif-file }}
         category: ${{ inputs.sarif-category }}
