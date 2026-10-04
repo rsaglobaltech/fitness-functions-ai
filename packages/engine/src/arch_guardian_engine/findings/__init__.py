@@ -6,5 +6,18 @@ from arch_guardian_engine.findings.model import (
     FindingLocation,
     FindingSource,
 )
+from arch_guardian_engine.findings.suppression import (
+    MEMBER_FILES_KEY,
+    SuppressionResult,
+    apply_exceptions,
+)
 
-__all__ = ["AnalysisReport", "Finding", "FindingLocation", "FindingSource"]
+__all__ = [
+    "MEMBER_FILES_KEY",
+    "AnalysisReport",
+    "Finding",
+    "FindingLocation",
+    "FindingSource",
+    "SuppressionResult",
+    "apply_exceptions",
+]

@@ -18,6 +18,7 @@ Design:
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass, field
 from enum import StrEnum
 from pathlib import Path
@@ -197,10 +198,16 @@ class RepoAnalysis:
 
 
 def _walk(node: Node) -> Iterator[Node]:
-    """Pre-order traversal over a Tree-sitter node."""
-    yield node
-    for child in node.children:
-        yield from _walk(child)
+    """Pre-order traversal over a Tree-sitter node.
+
+    Iterative on purpose: generated / deeply nested code would blow the
+    recursion limit with a recursive generator.
+    """
+    stack = [node]
+    while stack:
+        current = stack.pop()
+        yield current
+        stack.extend(reversed(current.children))
 
 
 def _text(node: Node, source: bytes) -> str:
@@ -263,8 +270,22 @@ class _PythonExtractor:
             elif node.type == "import_from_statement":
                 module_node = node.child_by_field_name("module_name")
                 module_name = _text(module_node, source) if module_node else ""
-                if module_name:
-                    out.append(Import(target=module_name, line=node.start_point[0] + 1))
+                if not module_name:
+                    continue
+                line = node.start_point[0] + 1
+                names = [
+                    _text(n.child_by_field_name("name") or n, source)
+                    if n.type == "aliased_import"
+                    else _text(n, source)
+                    for n in node.children_by_field_name("name")
+                ]
+                if not names:  # `from x import *`
+                    out.append(Import(target=module_name, line=line))
+                sep = "" if module_name.endswith(".") else "."
+                for imported in names:
+                    # `from pkg import mod` may name a submodule or a symbol;
+                    # the resolver trims trailing parts until a module matches.
+                    out.append(Import(target=f"{module_name}{sep}{imported}", line=line))
         return out
 
     def classes(self, tree: Tree, source: bytes) -> list[ClassInfo]:
@@ -360,10 +381,22 @@ class _TypeScriptExtractor:
     def imports(self, tree: Tree, source: bytes) -> list[Import]:
         out: list[Import] = []
         for node in _walk(tree.root_node):
-            if node.type == "import_statement":
+            if node.type in ("import_statement", "export_statement"):
                 src_node = node.child_by_field_name("source")
                 if src_node is not None:
                     raw = _text(src_node, source).strip("\"'`")
+                    out.append(Import(target=raw, line=node.start_point[0] + 1))
+            elif node.type == "call_expression":
+                # `require("x")` and dynamic `import("x")` with a literal specifier.
+                fn = node.child_by_field_name("function")
+                args = node.child_by_field_name("arguments")
+                if fn is None or args is None or fn.type not in ("identifier", "import"):
+                    continue
+                if fn.type == "identifier" and _text(fn, source) != "require":
+                    continue
+                literal = next((a for a in args.named_children if a.type == "string"), None)
+                if literal is not None:
+                    raw = _text(literal, source).strip("\"'`")
                     out.append(Import(target=raw, line=node.start_point[0] + 1))
         return out
 
@@ -570,15 +603,35 @@ def analyze_file(path: str | Path, *, root: str | Path | None = None) -> Module 
     )
 
 
-def _iter_source_files(root: Path) -> Iterator[Path]:
-    for p in root.rglob("*"):
-        if any(part in _SKIP_DIRS for part in p.parts):
-            continue
-        if p.is_file() and p.suffix.lower() in _EXTS:
+DEFAULT_MAX_FILE_BYTES = 1_000_000  # bigger files are generated / vendored in practice
+_SKIP_SUFFIXES = (".min.js", ".bundle.js", ".d.ts")
+
+
+def _iter_source_files(root: Path, max_file_bytes: int) -> Iterator[Path]:
+    """Yield supported source files, pruning skip-dirs instead of descending them."""
+    for dirpath, dirnames, filenames in os.walk(root, followlinks=False):
+        dirnames[:] = sorted(d for d in dirnames if d not in _SKIP_DIRS)
+        for name in sorted(filenames):
+            p = Path(dirpath) / name
+            if p.suffix.lower() not in _EXTS or name.lower().endswith(_SKIP_SUFFIXES):
+                continue
+            if p.is_symlink():
+                continue
+            try:
+                size = p.stat().st_size
+            except OSError:
+                continue
+            if size > max_file_bytes:
+                _log.info("file_skipped_too_large", file=str(p), bytes=size)
+                continue
             yield p
 
 
-def analyze_repo(root: str | Path) -> RepoAnalysis:
+def analyze_repo(
+    root: str | Path,
+    *,
+    max_file_bytes: int = DEFAULT_MAX_FILE_BYTES,
+) -> RepoAnalysis:
     """Walk a repository and produce per-file modules + the global import graph."""
     repo_root = Path(root).resolve()
     if not repo_root.is_dir():
@@ -586,7 +639,7 @@ def analyze_repo(root: str | Path) -> RepoAnalysis:
 
     analysis = RepoAnalysis(root=repo_root)
 
-    for path in _iter_source_files(repo_root):
+    for path in _iter_source_files(repo_root, max_file_bytes):
         try:
             module = analyze_file(path, root=repo_root)
         except Exception as exc:
@@ -598,13 +651,12 @@ def analyze_repo(root: str | Path) -> RepoAnalysis:
         analysis.modules[module.module_id] = module
         analysis.import_graph.add_node(module.module_id, path=str(path))
 
-    # Build edges only after all nodes exist, so we can prefix-match imports
-    # against known modules. We treat an import as "internal" if any module
-    # id is a prefix or suffix of the import target's dotted form.
-    known_ids = set(analysis.modules.keys())
+    # Edges are built once every node exists so imports can be resolved
+    # against the full module set.
+    resolver = _ImportResolver(repo_root, analysis.modules)
     for module in analysis.modules.values():
         for imp in module.imports:
-            target = _resolve_internal_target(imp.target, known_ids)
+            target = resolver.resolve(module, imp.target)
             if target is None or target == module.module_id:
                 continue
             analysis.import_graph.add_edge(module.module_id, target)
@@ -619,37 +671,152 @@ def analyze_repo(root: str | Path) -> RepoAnalysis:
     return analysis
 
 
+# ---------------------------------------------------------------------------
+# Import resolution
+# ---------------------------------------------------------------------------
+
 _IMPORT_SUFFIXES = (".js", ".ts", ".tsx", ".jsx", ".mjs", ".cjs", ".py")
+_TS_ALIAS_PREFIXES = ("@/", "~/", "#/")
 
 
 def _strip_known_suffix(value: str) -> str:
+    # Not `str.rstrip`: that is set-based and would eat trailing 's'/'t'.
     for suffix in _IMPORT_SUFFIXES:
         if value.endswith(suffix):
             return value[: -len(suffix)]
     return value
 
 
-def _resolve_internal_target(raw: str, known_ids: set[str]) -> str | None:
-    """Best-effort match of an import string to a known module id.
+def _common_prefix_len(a: tuple[str, ...], b: tuple[str, ...]) -> int:
+    n = 0
+    for x, y in zip(a, b, strict=False):
+        if x != y:
+            break
+        n += 1
+    return n
 
-    Strategy:
-        1. Direct hit.
-        2. Strip common file-extensions / relative prefixes.
-        3. Prefix / suffix match against the known set (longest wins).
 
-    Note: we use `_strip_known_suffix` instead of `str.rstrip` because rstrip
-    is *set*-based — it would chew off trailing letters like 's' or 't' from
-    a dotted module name, which silently mis-resolves imports.
+class _ImportResolver:
+    """Map raw import strings to known module ids.
+
+    Strategy, most to least precise:
+        1. Relative imports (`./x`, `../x`, Python leading dots) are resolved
+           against the importing file — never by name guessing.
+        2. Absolute imports: exact module id, else a dotted-suffix index lookup
+           (`billing.pricing` ↔ `src.billing.pricing`), trimming trailing
+           parts so `pkg.mod.Symbol` lands on `pkg.mod`.
+        3. Several suffix candidates: pick the one sharing the longest prefix
+           with the importer; if still tied, give up. A missing edge costs a
+           missed finding; a wrong edge creates a false *critical* cycle.
     """
-    if not raw:
+
+    def __init__(self, root: Path, modules: dict[str, Module]) -> None:
+        self._root = root
+        self._ids = set(modules)
+        # Python absolute imports start at a sys.path root, which is never
+        # inside a package; used to reject `import logging` → `pkg/logging.py`.
+        self._py_packages = {m.module_id for m in modules.values() if m.path.name == "__init__.py"}
+        self._suffix_index: dict[str, list[str]] = {}
+        for module_id in modules:
+            parts = module_id.split(".")
+            for i in range(len(parts)):
+                self._suffix_index.setdefault(".".join(parts[i:]), []).append(module_id)
+
+    def resolve(self, importer: Module, raw: str) -> str | None:
+        raw = raw.strip()
+        if not raw:
+            return None
+        if importer.language is Language.PYTHON:
+            if raw.startswith("."):
+                return self._resolve_python_relative(importer, raw)
+            return self._lookup(importer, raw.split("."), python_absolute=True)
+        if importer.language is Language.JAVA:
+            return self._lookup(importer, raw.split("."))
+        return self._resolve_js(importer, raw)
+
+    # -- Python --------------------------------------------------------------
+
+    def _resolve_python_relative(self, importer: Module, raw: str) -> str | None:
+        level = len(raw) - len(raw.lstrip("."))
+        rest = [p for p in raw[level:].split(".") if p]
+        package = importer.module_id.split(".")
+        if importer.path.name != "__init__.py":
+            package = package[:-1]
+        if level - 1 > len(package):
+            return None
+        base = package[: len(package) - (level - 1)]
+        parts = base + rest
+        # Trim trailing parts (imported symbols) but never above the base package.
+        for end in range(len(parts), len(base) - 1, -1):
+            candidate = ".".join(parts[:end])
+            if candidate in self._ids:
+                return candidate
         return None
-    candidate = _strip_known_suffix(raw.replace("/", ".").lstrip("."))
-    if candidate in known_ids:
-        return candidate
-    matches = [k for k in known_ids if k == candidate or k.endswith("." + candidate)]
-    if matches:
-        return max(matches, key=len)
-    matches = [k for k in known_ids if candidate.endswith(k) or candidate.startswith(k + ".")]
-    if matches:
-        return max(matches, key=len)
-    return None
+
+    # -- JS / TS -------------------------------------------------------------
+
+    def _resolve_js(self, importer: Module, raw: str) -> str | None:
+        if raw.startswith(("./", "../")) or raw in (".", ".."):
+            target = os.path.normpath(importer.path.parent / raw)
+            try:
+                rel = Path(target).relative_to(self._root)
+            except ValueError:
+                return None  # escapes the repo
+            dotted = _strip_known_suffix(rel.as_posix()).replace("/", ".")
+            for candidate in (dotted, f"{dotted}.index"):
+                if candidate in self._ids:
+                    return candidate
+            return None
+        for prefix in _TS_ALIAS_PREFIXES:
+            if raw.startswith(prefix):
+                raw = raw[len(prefix) :]
+                break
+        else:
+            if raw.startswith("@") or "/" not in raw:
+                # Scoped npm package or bare package name: external.
+                return None
+        parts = _strip_known_suffix(raw).split("/")
+        # Paths name files, not symbols: no trimming.
+        return self._lookup(importer, [*parts, "index"], trim=False) or self._lookup(
+            importer, parts, trim=False
+        )
+
+    # -- shared --------------------------------------------------------------
+
+    def _lookup(
+        self,
+        importer: Module,
+        parts: list[str],
+        *,
+        trim: bool = True,
+        python_absolute: bool = False,
+    ) -> str | None:
+        parts = [p for p in parts if p]
+        shortest = 1 if trim else len(parts)
+        for end in range(len(parts), max(shortest, 1) - 1, -1):
+            key = ".".join(parts[:end])
+            if key in self._ids:
+                return key
+            candidates = self._suffix_index.get(key, [])
+            if python_absolute:
+                candidates = [c for c in candidates if self._anchored_at_root(c, end)]
+            if candidates:
+                return self._pick(importer, candidates)
+        return None
+
+    def _anchored_at_root(self, candidate: str, key_len: int) -> bool:
+        prefix_parts = candidate.split(".")[:-key_len]
+        return not prefix_parts or ".".join(prefix_parts) not in self._py_packages
+
+    @staticmethod
+    def _pick(importer: Module, candidates: list[str]) -> str | None:
+        if len(candidates) == 1:
+            return candidates[0]
+        own = tuple(importer.module_id.split("."))
+        scored = sorted(
+            ((_common_prefix_len(own, tuple(c.split("."))), c) for c in candidates),
+            reverse=True,
+        )
+        if scored[0][0] == scored[1][0]:
+            return None
+        return scored[0][1]

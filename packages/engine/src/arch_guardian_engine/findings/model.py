@@ -91,6 +91,8 @@ class AnalysisReport(BaseModel):
     rule_pack: str | None = None  # "hexagonal@2.3.0" or None
     divergence_warning: str | None = None
     findings: tuple[Finding, ...] = ()
+    suppressed_count: int = 0  # findings silenced by `.architecture.yaml` exceptions
+    warnings: tuple[str, ...] = ()  # non-blocking notes (expired exceptions, ...)
     llm_cost_usd: float = 0.0
     duration_ms: int = 0
     generated_at: datetime = Field(default_factory=lambda: datetime.now(tz=UTC))

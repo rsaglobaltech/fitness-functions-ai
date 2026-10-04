@@ -16,7 +16,12 @@ import networkx as nx
 
 from arch_guardian_engine.ast_analyzer import RepoAnalysis
 from arch_guardian_engine.config import Severity
-from arch_guardian_engine.findings import Finding, FindingLocation, FindingSource
+from arch_guardian_engine.findings import (
+    MEMBER_FILES_KEY,
+    Finding,
+    FindingLocation,
+    FindingSource,
+)
 
 RULE_ID = "universal.circular_dependency"
 
@@ -36,6 +41,12 @@ def detect_circular_dependencies(
         anchor_module = analysis.modules.get(anchor_id)
         anchor_path = (
             str(anchor_module.path.relative_to(analysis.root)) if anchor_module else anchor_id
+        )
+
+        member_files = sorted(
+            str(m.path.relative_to(analysis.root))
+            for m in (analysis.modules.get(mid) for mid in ordered)
+            if m is not None
         )
 
         message = "Modules form a dependency cycle:\n  " + " → ".join(ordered) + f" → {ordered[0]}"
@@ -62,6 +73,7 @@ def detect_circular_dependencies(
                 metadata={
                     "scc_size": len(ordered),
                     "members": ",".join(ordered),
+                    MEMBER_FILES_KEY: ",".join(member_files),
                 },
             )
         )
