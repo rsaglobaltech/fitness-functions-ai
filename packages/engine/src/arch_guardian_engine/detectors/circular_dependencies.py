@@ -34,22 +34,26 @@ def detect_circular_dependencies(
     """Return one finding per cyclic dependency SCC (size > 1)."""
     findings: list[Finding] = []
 
-    sccs = (scc for scc in nx.strongly_connected_components(analysis.import_graph) if len(scc) > 1)
+    graph = analysis.import_graph
+    sccs = (scc for scc in nx.strongly_connected_components(graph) if len(scc) > 1)
     for scc in sccs:
         ordered = sorted(scc)
         anchor_id = ordered[0]
         anchor_module = analysis.modules.get(anchor_id)
-        anchor_path = (
-            str(anchor_module.path.relative_to(analysis.root)) if anchor_module else anchor_id
-        )
+        anchor_path = analysis.rel_path(anchor_id) if anchor_module else anchor_id
+        member_files = sorted(analysis.rel_path(mid) for mid in ordered if mid in analysis.modules)
 
-        member_files = sorted(
-            str(m.path.relative_to(analysis.root))
-            for m in (analysis.modules.get(mid) for mid in ordered)
-            if m is not None
-        )
-
-        message = "Modules form a dependency cycle:\n  " + " → ".join(ordered) + f" → {ordered[0]}"
+        cycle = _shortest_cycle(graph, scc, anchor_id)
+        # Anchor at the import that starts the shortest cycle.
+        import_lines: list[int] = graph.edges[cycle[0], cycle[1]].get("lines") or []
+        path = " → ".join(cycle)
+        if len(scc) == len(cycle) - 1:
+            message = f"Modules form a dependency cycle:\n  {path}"
+        else:
+            message = (
+                f"{len(scc)} modules are mutually dependent (one strongly connected "
+                f"group). Shortest cycle through {anchor_id}:\n  {path}"
+            )
 
         findings.append(
             Finding(
@@ -59,9 +63,7 @@ def detect_circular_dependencies(
                 message=message,
                 location=FindingLocation(
                     file=anchor_path,
-                    line=anchor_module.imports[0].line
-                    if anchor_module and anchor_module.imports
-                    else None,
+                    line=min(import_lines) if import_lines else None,
                     symbol=anchor_id,
                 ),
                 source=FindingSource.UNIVERSAL,
@@ -73,9 +75,25 @@ def detect_circular_dependencies(
                 metadata={
                     "scc_size": len(ordered),
                     "members": ",".join(ordered),
+                    "shortest_cycle": path,
                     MEMBER_FILES_KEY: ",".join(member_files),
                 },
             )
         )
 
     return findings
+
+
+def _shortest_cycle(graph: nx.DiGraph[str], scc: set[str], anchor: str) -> list[str]:
+    """Shortest real cycle through `anchor` inside its SCC, closed (first == last).
+
+    One BFS on the reversed SCC gives every node's shortest path *to* the
+    anchor; the best successor of the anchor closes the shortest loop.
+    """
+    sub = graph.subgraph(scc)
+    to_anchor = nx.single_source_shortest_path(sub.reverse(copy=False), anchor)
+    best = min(
+        (s for s in sub.successors(anchor) if s in to_anchor),
+        key=lambda s: (len(to_anchor[s]), s),
+    )
+    return [anchor, *reversed(to_anchor[best])]

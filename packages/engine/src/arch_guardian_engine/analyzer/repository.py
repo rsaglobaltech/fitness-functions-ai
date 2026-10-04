@@ -49,6 +49,7 @@ class RepositoryAnalyzer:
     today: date | None = None  # injectable clock for exception expiry
     apply_exceptions: bool = True
     profile: ArchitectureProfile | None = None
+    jobs: int = 0  # parser processes; 0 = auto
 
     def analyze(self, repo_root: str | Path) -> AnalysisReport:
         start = perf_counter()
@@ -58,7 +59,7 @@ class RepositoryAnalyzer:
         profile = self.profile or resolved.profile
         config_error = resolved.config_error if self.profile is None else None
         rules = self.rules or (profile.universal_rules if profile else UniversalRules())
-        ast = analyze_repo(root, exclude=profile.exclude if profile else ())
+        ast = analyze_repo(root, exclude=profile.exclude if profile else (), jobs=self.jobs)
 
         findings = _universal_findings(ast, rules)
         rule_pack = None

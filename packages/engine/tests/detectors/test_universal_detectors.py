@@ -121,3 +121,17 @@ def test_universal_finding_source_is_universal() -> None:
     analysis = analyze_repo(PLANTED)
     for finding in detect_circular_dependencies(analysis):
         assert finding.source is FindingSource.UNIVERSAL
+
+
+@pytest.mark.unit
+def test_cycle_message_shows_real_shortest_path(tmp_path: Path) -> None:
+    from arch_guardian_engine.ast_analyzer import analyze_repo
+
+    # a → b → c → a plus a shortcut c → b: SCC {a,b,c}; shortest cycle through a has 3 hops.
+    (tmp_path / "a.py").write_text("import b\n", encoding="utf-8")
+    (tmp_path / "b.py").write_text("x = 1\nimport c\n", encoding="utf-8")
+    (tmp_path / "c.py").write_text("import a\nimport b\n", encoding="utf-8")
+    (finding,) = detect_circular_dependencies(analyze_repo(tmp_path))
+    assert "a → b → c → a" in finding.message
+    assert finding.location.line == 1  # the `import b` in a.py starts the cycle
+    assert finding.metadata["shortest_cycle"] == "a → b → c → a"

@@ -19,10 +19,11 @@ Design:
 from __future__ import annotations
 
 import os
+from concurrent.futures import ProcessPoolExecutor
 from dataclasses import dataclass, field
 from enum import StrEnum
 from pathlib import Path
-from typing import TYPE_CHECKING, Protocol
+from typing import TYPE_CHECKING
 
 import networkx as nx
 from tree_sitter import Language as TSLanguage
@@ -211,19 +212,6 @@ class RepoAnalysis:
 # ---------------------------------------------------------------------------
 
 
-def _walk(node: Node) -> Iterator[Node]:
-    """Pre-order traversal over a Tree-sitter node.
-
-    Iterative on purpose: generated / deeply nested code would blow the
-    recursion limit with a recursive generator.
-    """
-    stack = [node]
-    while stack:
-        current = stack.pop()
-        yield current
-        stack.extend(reversed(current.children))
-
-
 def _text(node: Node, source: bytes) -> str:
     return source[node.start_byte : node.end_byte].decode("utf-8", errors="ignore")
 
@@ -239,355 +227,314 @@ def _module_id_for(path: Path, root: Path, language: Language) -> str:
 # ---------------------------------------------------------------------------
 # Extractors per language
 # ---------------------------------------------------------------------------
+#
+# Each file is scanned in ONE pre-order pass over named nodes (`_scan`). Every
+# node is tagged with its innermost enclosing function, so a decision point
+# counts toward exactly one function: a callback's branches belong to the
+# callback, not to the function that defines it (same model as ESLint's
+# `complexity` rule). This is also what keeps the scan linear in file size.
 
 
-class _Extractor(Protocol):
-    def imports(self, tree: Tree, source: bytes) -> list[Import]: ...
-    def classes(self, tree: Tree, source: bytes) -> list[ClassInfo]: ...
-    def functions(self, tree: Tree, source: bytes) -> list[FunctionInfo]: ...
+def _params(node: Node) -> int:
+    params_node = node.child_by_field_name("parameters")
+    if params_node is None:
+        return 0
+    return sum(1 for c in params_node.named_children if c.type != "comment")
+
+
+def _line(node: Node) -> int:
+    return node.start_point[0] + 1
+
+
+class _LangSpec:
+    """Per-language node vocabulary + hooks used by `_scan`."""
+
+    function_types: frozenset[str]
+    class_types: frozenset[str]
+    import_types: frozenset[str]
+    decision_types: frozenset[str]
+    logical_ops: frozenset[str] = frozenset()  # operators of `binary_expression` that branch
+
+    def imports_of(self, node: Node, source: bytes) -> list[Import]:
+        raise NotImplementedError
+
+    def class_of(self, node: Node, source: bytes) -> ClassInfo | None:
+        raise NotImplementedError
+
+    def function_name(self, node: Node, source: bytes) -> str | None:
+        name_node = node.child_by_field_name("name")
+        return _text(name_node, source) if name_node else "<anonymous>"
+
+
+def _class_info(node: Node, source: bytes, counts: tuple[int, int, int]) -> ClassInfo | None:
+    name_node = node.child_by_field_name("name")
+    if name_node is None:
+        return None
+    public_methods, total_methods, fields = counts
+    return ClassInfo(
+        name=_text(name_node, source),
+        start_line=_line(node),
+        end_line=node.end_point[0] + 1,
+        public_methods=public_methods,
+        total_methods=total_methods,
+        fields=fields,
+    )
+
+
+def _scan(
+    tree: Tree, source: bytes, spec: _LangSpec
+) -> tuple[list[Import], list[ClassInfo], list[FunctionInfo]]:
+    imports: list[Import] = []
+    classes: list[ClassInfo] = []
+    fn_nodes: list[Node] = []
+    decisions: list[int] = []
+
+    stack: list[tuple[Node, int]] = [(tree.root_node, -1)]
+    while stack:
+        node, ctx = stack.pop()
+        kind = node.type
+        if ctx >= 0:
+            if kind in spec.decision_types:
+                decisions[ctx] += 1
+            elif kind == "binary_expression" and spec.logical_ops:
+                op = node.child_by_field_name("operator")
+                if op is not None and _text(op, source) in spec.logical_ops:
+                    decisions[ctx] += 1
+        if kind in spec.function_types:
+            fn_nodes.append(node)
+            decisions.append(0)
+            ctx = len(fn_nodes) - 1
+        elif kind in spec.class_types:
+            info = spec.class_of(node, source)
+            if info is not None:
+                classes.append(info)
+        if kind in spec.import_types:
+            imports.extend(spec.imports_of(node, source))
+        children = node.named_children
+        if children:
+            stack.extend((child, ctx) for child in reversed(children))
+
+    functions: list[FunctionInfo] = []
+    for fn, count in zip(fn_nodes, decisions, strict=True):
+        name = spec.function_name(fn, source)
+        if name is None:
+            continue
+        functions.append(
+            FunctionInfo(
+                name=name,
+                start_line=_line(fn),
+                end_line=fn.end_point[0] + 1,
+                parameters=_params(fn),
+                decision_points=count,
+            )
+        )
+    return imports, classes, functions
 
 
 # --- Python ----------------------------------------------------------------
 
-_PY_DECISION_KINDS: frozenset[str] = frozenset(
-    {
-        "if_statement",
-        "elif_clause",
-        "for_statement",
-        "while_statement",
-        "except_clause",
-        "case_clause",
-        "boolean_operator",
-        "conditional_expression",
-        "comprehension_if_clause",
-    }
-)
 
+class _PythonSpec(_LangSpec):
+    function_types = frozenset({"function_definition"})
+    class_types = frozenset({"class_definition"})
+    import_types = frozenset({"import_statement", "import_from_statement"})
+    decision_types = frozenset(
+        {
+            "if_statement",
+            "elif_clause",
+            "for_statement",
+            "while_statement",
+            "except_clause",
+            "case_clause",
+            "boolean_operator",
+            "conditional_expression",
+            "if_clause",  # comprehension filter
+        }
+    )
 
-class _PythonExtractor:
-    def imports(self, tree: Tree, source: bytes) -> list[Import]:
-        out: list[Import] = []
-        for node in _walk(tree.root_node):
-            if node.type == "import_statement":
-                for name in node.children_by_field_name("name"):
-                    out.append(Import(target=_text(name, source), line=node.start_point[0] + 1))
-                # Fallback when fields aren't filled: scan child dotted names.
-                if not node.children_by_field_name("name"):
-                    for child in node.named_children:
-                        if child.type == "dotted_name":
-                            out.append(
-                                Import(
-                                    target=_text(child, source),
-                                    line=node.start_point[0] + 1,
-                                )
-                            )
-            elif node.type == "import_from_statement":
-                module_node = node.child_by_field_name("module_name")
-                module_name = _text(module_node, source) if module_node else ""
-                if not module_name:
-                    continue
-                line = node.start_point[0] + 1
-                names = [
-                    _text(n.child_by_field_name("name") or n, source)
+    def imports_of(self, node: Node, source: bytes) -> list[Import]:
+        line = _line(node)
+        if node.type == "import_statement":
+            names = node.children_by_field_name("name") or [
+                c for c in node.named_children if c.type == "dotted_name"
+            ]
+            return [
+                Import(
+                    target=_text(n.child_by_field_name("name") or n, source)
                     if n.type == "aliased_import"
-                    else _text(n, source)
-                    for n in node.children_by_field_name("name")
-                ]
-                if not names:  # `from x import *`
-                    out.append(Import(target=module_name, line=line))
-                sep = "" if module_name.endswith(".") else "."
-                for imported in names:
-                    # `from pkg import mod` may name a submodule or a symbol;
-                    # the resolver trims trailing parts until a module matches.
-                    out.append(Import(target=f"{module_name}{sep}{imported}", line=line))
-        return out
-
-    def classes(self, tree: Tree, source: bytes) -> list[ClassInfo]:
-        out: list[ClassInfo] = []
-        for node in _walk(tree.root_node):
-            if node.type != "class_definition":
-                continue
-            name_node = node.child_by_field_name("name")
-            body = node.child_by_field_name("body")
-            if name_node is None:
-                continue
-            public_methods, total_methods, fields = 0, 0, 0
-            if body is not None:
-                for child in body.named_children:
-                    if child.type == "function_definition":
-                        total_methods += 1
-                        n = child.child_by_field_name("name")
-                        if n and not _text(n, source).startswith("_"):
-                            public_methods += 1
-                    elif child.type == "assignment":
-                        fields += 1
-            out.append(
-                ClassInfo(
-                    name=_text(name_node, source),
-                    start_line=node.start_point[0] + 1,
-                    end_line=node.end_point[0] + 1,
-                    public_methods=public_methods,
-                    total_methods=total_methods,
-                    fields=fields,
+                    else _text(n, source),
+                    line=line,
                 )
-            )
-        return out
+                for n in names
+            ]
+        module_node = node.child_by_field_name("module_name")
+        module_name = _text(module_node, source) if module_node else ""
+        if not module_name:
+            return []
+        imported = [
+            _text(n.child_by_field_name("name") or n, source)
+            if n.type == "aliased_import"
+            else _text(n, source)
+            for n in node.children_by_field_name("name")
+        ]
+        if not imported:  # `from x import *`
+            return [Import(target=module_name, line=line)]
+        sep = "" if module_name.endswith(".") else "."
+        # `from pkg import mod` may name a submodule or a symbol; the resolver
+        # trims trailing parts until a module matches.
+        return [Import(target=f"{module_name}{sep}{name}", line=line) for name in imported]
 
-    def functions(self, tree: Tree, source: bytes) -> list[FunctionInfo]:
-        out: list[FunctionInfo] = []
-        for node in _walk(tree.root_node):
-            if node.type != "function_definition":
-                continue
-            name_node = node.child_by_field_name("name")
-            params_node = node.child_by_field_name("parameters")
-            if name_node is None:
-                continue
-            params = (
-                sum(1 for c in params_node.named_children if c.type != "comment")
-                if params_node is not None
-                else 0
-            )
-            decisions = sum(1 for n in _walk(node) if n.type in _PY_DECISION_KINDS)
-            out.append(
-                FunctionInfo(
-                    name=_text(name_node, source),
-                    start_line=node.start_point[0] + 1,
-                    end_line=node.end_point[0] + 1,
-                    parameters=params,
-                    decision_points=decisions,
-                )
-            )
-        return out
+    def class_of(self, node: Node, source: bytes) -> ClassInfo | None:
+        public_methods = total_methods = fields = 0
+        body = node.child_by_field_name("body")
+        for child in body.named_children if body is not None else ():
+            if child.type == "decorated_definition":
+                child = child.child_by_field_name("definition") or child
+            if child.type == "function_definition":
+                total_methods += 1
+                n = child.child_by_field_name("name")
+                if n and not _text(n, source).startswith("_"):
+                    public_methods += 1
+            elif child.type == "expression_statement" and any(
+                c.type == "assignment" for c in child.named_children
+            ):
+                fields += 1
+        return _class_info(node, source, (public_methods, total_methods, fields))
+
+    def function_name(self, node: Node, source: bytes) -> str | None:
+        name_node = node.child_by_field_name("name")
+        return _text(name_node, source) if name_node else None
 
 
 # --- TypeScript / JavaScript ----------------------------------------------
 
-_TS_DECISION_KINDS: frozenset[str] = frozenset(
-    {
-        "if_statement",
-        "for_statement",
-        "for_in_statement",
-        "for_of_statement",
-        "while_statement",
-        "do_statement",
-        "switch_case",
-        "ternary_expression",
-        "catch_clause",
-    }
-)
-# `||`, `&&`, `??` are nested under `binary_expression`; counted separately.
 
-
-def _count_ts_decisions(node: Node, source: bytes) -> int:
-    count = 0
-    for n in _walk(node):
-        if n.type in _TS_DECISION_KINDS:
-            count += 1
-            continue
-        if n.type == "binary_expression":
-            op_node = n.child_by_field_name("operator")
-            if op_node is not None and _text(op_node, source) in ("&&", "||", "??"):
-                count += 1
-    return count
-
-
-class _TypeScriptExtractor:
-    def imports(self, tree: Tree, source: bytes) -> list[Import]:
-        out: list[Import] = []
-        for node in _walk(tree.root_node):
-            if node.type in ("import_statement", "export_statement"):
-                src_node = node.child_by_field_name("source")
-                if src_node is not None:
-                    raw = _text(src_node, source).strip("\"'`")
-                    out.append(Import(target=raw, line=node.start_point[0] + 1))
-            elif node.type == "call_expression":
-                # `require("x")` and dynamic `import("x")` with a literal specifier.
-                fn = node.child_by_field_name("function")
-                args = node.child_by_field_name("arguments")
-                if fn is None or args is None or fn.type not in ("identifier", "import"):
-                    continue
-                if fn.type == "identifier" and _text(fn, source) != "require":
-                    continue
-                literal = next((a for a in args.named_children if a.type == "string"), None)
-                if literal is not None:
-                    raw = _text(literal, source).strip("\"'`")
-                    out.append(Import(target=raw, line=node.start_point[0] + 1))
-        return out
-
-    def classes(self, tree: Tree, source: bytes) -> list[ClassInfo]:
-        out: list[ClassInfo] = []
-        for node in _walk(tree.root_node):
-            if node.type != "class_declaration":
-                continue
-            name_node = node.child_by_field_name("name")
-            body = node.child_by_field_name("body")
-            if name_node is None:
-                continue
-            public_methods, total_methods, fields = 0, 0, 0
-            if body is not None:
-                for child in body.named_children:
-                    if child.type in ("method_definition", "abstract_method_signature"):
-                        total_methods += 1
-                        accessors = [
-                            _text(c, source)
-                            for c in child.children
-                            if c.type == "accessibility_modifier"
-                        ]
-                        if "private" not in accessors and "protected" not in accessors:
-                            public_methods += 1
-                    elif child.type in ("public_field_definition", "field_definition"):
-                        fields += 1
-            out.append(
-                ClassInfo(
-                    name=_text(name_node, source),
-                    start_line=node.start_point[0] + 1,
-                    end_line=node.end_point[0] + 1,
-                    public_methods=public_methods,
-                    total_methods=total_methods,
-                    fields=fields,
-                )
-            )
-        return out
-
-    def functions(self, tree: Tree, source: bytes) -> list[FunctionInfo]:
-        out: list[FunctionInfo] = []
-        targets = {
+class _TypeScriptSpec(_LangSpec):
+    function_types = frozenset(
+        {
             "function_declaration",
+            "generator_function_declaration",
             "method_definition",
             "arrow_function",
             "function_expression",
         }
-        for node in _walk(tree.root_node):
-            if node.type not in targets:
-                continue
-            name_node = node.child_by_field_name("name")
-            params_node = node.child_by_field_name("parameters")
-            params = (
-                sum(1 for c in params_node.named_children if c.type != "comment")
-                if params_node is not None
-                else 0
-            )
-            name = _text(name_node, source) if name_node else "<anonymous>"
-            out.append(
-                FunctionInfo(
-                    name=name,
-                    start_line=node.start_point[0] + 1,
-                    end_line=node.end_point[0] + 1,
-                    parameters=params,
-                    decision_points=_count_ts_decisions(node, source),
-                )
-            )
-        return out
+    )
+    class_types = frozenset({"class_declaration", "abstract_class_declaration", "class"})
+    import_types = frozenset({"import_statement", "export_statement", "call_expression"})
+    decision_types = frozenset(
+        {
+            "if_statement",
+            "for_statement",
+            "for_in_statement",  # also covers for...of in this grammar
+            "while_statement",
+            "do_statement",
+            "switch_case",
+            "ternary_expression",
+            "catch_clause",
+        }
+    )
+    logical_ops = frozenset({"&&", "||", "??"})
+
+    def imports_of(self, node: Node, source: bytes) -> list[Import]:
+        if node.type != "call_expression":
+            src_node = node.child_by_field_name("source")
+            if src_node is None:
+                return []
+            return [Import(target=_text(src_node, source).strip("\"'`"), line=_line(node))]
+        # `require("x")` and dynamic `import("x")` with a literal specifier.
+        fn = node.child_by_field_name("function")
+        if fn is None or fn.type not in ("identifier", "import"):
+            return []
+        if fn.type == "identifier" and _text(fn, source) != "require":
+            return []
+        args = node.child_by_field_name("arguments")
+        literal = (
+            next((a for a in args.named_children if a.type == "string"), None)
+            if args is not None
+            else None
+        )
+        if literal is None:
+            return []
+        return [Import(target=_text(literal, source).strip("\"'`"), line=_line(node))]
+
+    def class_of(self, node: Node, source: bytes) -> ClassInfo | None:
+        public_methods = total_methods = fields = 0
+        body = node.child_by_field_name("body")
+        for child in body.named_children if body is not None else ():
+            if child.type in ("method_definition", "abstract_method_signature"):
+                total_methods += 1
+                accessors = {
+                    _text(c, source) for c in child.children if c.type == "accessibility_modifier"
+                }
+                name = child.child_by_field_name("name")
+                is_private_name = name is not None and name.type == "private_property_identifier"
+                if not accessors & {"private", "protected"} and not is_private_name:
+                    public_methods += 1
+            elif child.type in ("public_field_definition", "field_definition"):
+                fields += 1
+        return _class_info(node, source, (public_methods, total_methods, fields))
 
 
 # --- Java ------------------------------------------------------------------
 
-_JAVA_DECISION_KINDS: frozenset[str] = frozenset(
-    {
-        "if_statement",
-        "for_statement",
-        "enhanced_for_statement",
-        "while_statement",
-        "do_statement",
-        "switch_label",
-        "ternary_expression",
-        "catch_clause",
-    }
-)
+
+class _JavaSpec(_LangSpec):
+    function_types = frozenset(
+        {"method_declaration", "constructor_declaration", "lambda_expression"}
+    )
+    class_types = frozenset(
+        {"class_declaration", "interface_declaration", "enum_declaration", "record_declaration"}
+    )
+    import_types = frozenset({"import_declaration"})
+    decision_types = frozenset(
+        {
+            "if_statement",
+            "for_statement",
+            "enhanced_for_statement",
+            "while_statement",
+            "do_statement",
+            "switch_label",
+            "ternary_expression",
+            "catch_clause",
+        }
+    )
+    logical_ops = frozenset({"&&", "||"})
+
+    def imports_of(self, node: Node, source: bytes) -> list[Import]:
+        for child in node.named_children:
+            if child.type in ("scoped_identifier", "identifier"):
+                return [Import(target=_text(child, source), line=_line(node))]
+        return []
+
+    def class_of(self, node: Node, source: bytes) -> ClassInfo | None:
+        public_methods = total_methods = fields = 0
+        body = node.child_by_field_name("body")
+        members = body.named_children if body is not None else []
+        if node.type == "enum_declaration" and body is not None:
+            decls = next((c for c in members if c.type == "enum_body_declarations"), None)
+            members = decls.named_children if decls is not None else []
+        for child in members:
+            if child.type == "method_declaration":
+                total_methods += 1
+                modifiers = next((c for c in child.children if c.type == "modifiers"), None)
+                if modifiers is not None and "public" in _text(modifiers, source).split():
+                    public_methods += 1
+            elif child.type == "field_declaration":
+                fields += 1
+        return _class_info(node, source, (public_methods, total_methods, fields))
+
+    def function_name(self, node: Node, source: bytes) -> str | None:
+        if node.type == "lambda_expression":
+            return "<lambda>"
+        return super().function_name(node, source)
 
 
-def _count_java_decisions(node: Node, source: bytes) -> int:
-    count = 0
-    for n in _walk(node):
-        if n.type in _JAVA_DECISION_KINDS:
-            count += 1
-            continue
-        if n.type == "binary_expression":
-            op_node = n.child_by_field_name("operator")
-            if op_node is not None and _text(op_node, source) in ("&&", "||"):
-                count += 1
-    return count
-
-
-class _JavaExtractor:
-    def imports(self, tree: Tree, source: bytes) -> list[Import]:
-        out: list[Import] = []
-        for node in _walk(tree.root_node):
-            if node.type == "import_declaration":
-                for child in node.named_children:
-                    if child.type in ("scoped_identifier", "identifier"):
-                        out.append(
-                            Import(target=_text(child, source), line=node.start_point[0] + 1)
-                        )
-                        break
-        return out
-
-    def classes(self, tree: Tree, source: bytes) -> list[ClassInfo]:
-        out: list[ClassInfo] = []
-        for node in _walk(tree.root_node):
-            if node.type not in ("class_declaration", "interface_declaration"):
-                continue
-            name_node = node.child_by_field_name("name")
-            body = node.child_by_field_name("body")
-            if name_node is None:
-                continue
-            public_methods, total_methods, fields = 0, 0, 0
-            if body is not None:
-                for child in body.named_children:
-                    if child.type == "method_declaration":
-                        total_methods += 1
-                        modifiers = next(
-                            (c for c in child.children if c.type == "modifiers"),
-                            None,
-                        )
-                        is_public = modifiers is not None and "public" in _text(modifiers, source)
-                        if is_public:
-                            public_methods += 1
-                    elif child.type == "field_declaration":
-                        fields += 1
-            out.append(
-                ClassInfo(
-                    name=_text(name_node, source),
-                    start_line=node.start_point[0] + 1,
-                    end_line=node.end_point[0] + 1,
-                    public_methods=public_methods,
-                    total_methods=total_methods,
-                    fields=fields,
-                )
-            )
-        return out
-
-    def functions(self, tree: Tree, source: bytes) -> list[FunctionInfo]:
-        out: list[FunctionInfo] = []
-        for node in _walk(tree.root_node):
-            if node.type != "method_declaration":
-                continue
-            name_node = node.child_by_field_name("name")
-            params_node = node.child_by_field_name("parameters")
-            params = (
-                sum(1 for c in params_node.named_children if c.type != "comment")
-                if params_node is not None
-                else 0
-            )
-            name = _text(name_node, source) if name_node else "<anonymous>"
-            out.append(
-                FunctionInfo(
-                    name=name,
-                    start_line=node.start_point[0] + 1,
-                    end_line=node.end_point[0] + 1,
-                    parameters=params,
-                    decision_points=_count_java_decisions(node, source),
-                )
-            )
-        return out
-
-
-_EXTRACTORS: dict[Language, _Extractor] = {
-    Language.PYTHON: _PythonExtractor(),
-    Language.TYPESCRIPT: _TypeScriptExtractor(),
-    Language.TSX: _TypeScriptExtractor(),
-    Language.JAVASCRIPT: _TypeScriptExtractor(),
-    Language.JAVA: _JavaExtractor(),
+_SPECS: dict[Language, _LangSpec] = {
+    Language.PYTHON: _PythonSpec(),
+    Language.TYPESCRIPT: _TypeScriptSpec(),
+    Language.TSX: _TypeScriptSpec(),
+    Language.JAVASCRIPT: _TypeScriptSpec(),
+    Language.JAVA: _JavaSpec(),
 }
 
 
@@ -605,15 +552,15 @@ def analyze_file(path: str | Path, *, root: str | Path | None = None) -> Module 
     parser = _parser_for(lang)
     source = p.read_bytes()
     tree = parser.parse(source)
-    extractor = _EXTRACTORS[lang]
+    imports, classes, functions = _scan(tree, source, _SPECS[lang])
     repo_root = Path(root).resolve() if root else p.parent
     return Module(
         path=p,
         language=lang,
         module_id=_module_id_for(p, repo_root, lang),
-        imports=tuple(extractor.imports(tree, source)),
-        classes=tuple(extractor.classes(tree, source)),
-        functions=tuple(extractor.functions(tree, source)),
+        imports=tuple(imports),
+        classes=tuple(classes),
+        functions=tuple(functions),
     )
 
 
@@ -648,6 +595,35 @@ def _iter_source_files(root: Path, max_file_bytes: int, exclude: tuple[str, ...]
             yield p
 
 
+_PARALLEL_MIN_FILES = 64  # below this, process start-up costs more than it saves
+_MAX_AUTO_JOBS = 8
+
+_ParseResult = tuple[Path, "Module | None", "str | None"]
+
+
+def _parse_one(path: Path, root: Path) -> _ParseResult:
+    try:
+        return path, analyze_file(path, root=root), None
+    except Exception as exc:  # one broken file must not abort the analysis
+        return path, None, repr(exc)
+
+
+def _parse_chunk(paths: list[Path], root: Path) -> list[_ParseResult]:
+    return [_parse_one(p, root) for p in paths]
+
+
+def _parse_all(paths: list[Path], root: Path, jobs: int) -> list[_ParseResult]:
+    workers = jobs if jobs > 0 else min(os.cpu_count() or 1, _MAX_AUTO_JOBS)
+    if workers <= 1 or len(paths) < _PARALLEL_MIN_FILES:
+        return _parse_chunk(paths, root)
+    # Contiguous chunks keep result order deterministic and amortise IPC.
+    size = max(16, len(paths) // (workers * 4))
+    chunks = [paths[i : i + size] for i in range(0, len(paths), size)]
+    with ProcessPoolExecutor(max_workers=workers) as pool:
+        results = pool.map(_parse_chunk, chunks, [root] * len(chunks))
+        return [r for chunk in results for r in chunk]
+
+
 def _dir_excluded(rel_dir: str, exclude: tuple[str, ...]) -> bool:
     # `fixtures/**` must prune the `fixtures` dir itself, not only its files.
     return any(
@@ -661,22 +637,23 @@ def analyze_repo(
     *,
     max_file_bytes: int = DEFAULT_MAX_FILE_BYTES,
     exclude: tuple[str, ...] = (),
+    jobs: int = 0,
 ) -> RepoAnalysis:
     """Walk a repository and produce per-file modules + the global import graph.
 
     `exclude` holds repo-relative globs (see `arch_guardian_engine.paths`).
+    `jobs` is the number of parser processes; 0 picks one per CPU (capped).
     """
     repo_root = Path(root).resolve()
     if not repo_root.is_dir():
         raise FileNotFoundError(f"not a directory: {repo_root}")
 
     analysis = RepoAnalysis(root=repo_root)
+    paths = list(_iter_source_files(repo_root, max_file_bytes, exclude))
 
-    for path in _iter_source_files(repo_root, max_file_bytes, exclude):
-        try:
-            module = analyze_file(path, root=repo_root)
-        except Exception as exc:
-            _log.warning("ast_parse_failed", file=str(path), error=repr(exc))
+    for path, module, error in _parse_all(paths, repo_root, jobs):
+        if error is not None:
+            _log.warning("ast_parse_failed", file=str(path), error=error)
             analysis.skipped.append(path)
             continue
         if module is None:

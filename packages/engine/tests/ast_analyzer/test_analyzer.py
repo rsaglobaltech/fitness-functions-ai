@@ -89,3 +89,68 @@ def test_unsupported_file_returns_none(tmp_path: Path) -> None:
     src = tmp_path / "note.txt"
     src.write_text("hello", encoding="utf-8")
     assert analyze_file(src, root=tmp_path) is None
+
+
+@pytest.mark.unit
+def test_spec_node_kinds_exist_in_grammars() -> None:
+    from arch_guardian_engine.ast_analyzer.analyzer import _SPECS, _parser_for
+
+    for lang, spec in _SPECS.items():
+        grammar = _parser_for(lang).language
+        kinds = spec.function_types | spec.class_types | spec.import_types | spec.decision_types
+        unknown = sorted(k for k in kinds if grammar.id_for_node_kind(k, True) is None)
+        assert unknown == [], f"{lang}: {unknown}"
+
+
+@pytest.mark.unit
+def test_nested_functions_own_their_decisions(tmp_path: Path) -> None:
+    src = tmp_path / "m.ts"
+    src.write_text(
+        "function outer(xs: number[]) {\n"
+        "  if (xs.length) {}\n"
+        "  return xs.map((x) => (x > 0 ? x : -x));\n"
+        "}\n"
+        "for (const x of [1]) {}\n",
+        encoding="utf-8",
+    )
+    module = analyze_file(src, root=tmp_path)
+    assert module is not None
+    cc = {f.name: f.cyclomatic_complexity for f in module.functions}
+    assert cc == {"outer": 2, "<anonymous>": 2}
+
+
+@pytest.mark.unit
+def test_python_class_metrics_decorators_fields_and_comprehension_filters(tmp_path: Path) -> None:
+    src = tmp_path / "m.py"
+    src.write_text(
+        "class A:\n"
+        "    x = 1\n"
+        "    y: int = 2\n"
+        "    @property\n"
+        "    def p(self): return 1\n"
+        "    def _q(self): return [i for i in range(3) if i]\n",
+        encoding="utf-8",
+    )
+    module = analyze_file(src, root=tmp_path)
+    assert module is not None
+    a = module.classes[0]
+    assert (a.public_methods, a.total_methods, a.fields) == (1, 2, 2)
+    assert {f.name: f.cyclomatic_complexity for f in module.functions}["_q"] == 2
+
+
+@pytest.mark.unit
+def test_java_constructors_and_lambdas_are_functions(tmp_path: Path) -> None:
+    src = tmp_path / "A.java"
+    src.write_text(
+        "class A {\n"
+        "  A(int x) { if (x > 0) {} }\n"
+        "  public void run(java.util.List<Integer> xs) {\n"
+        "    xs.forEach(x -> { if (x > 1 && x < 5) {} });\n"
+        "  }\n"
+        "}\n",
+        encoding="utf-8",
+    )
+    module = analyze_file(src, root=tmp_path)
+    assert module is not None
+    cc = {f.name: f.cyclomatic_complexity for f in module.functions}
+    assert cc == {"A": 2, "run": 1, "<lambda>": 3}

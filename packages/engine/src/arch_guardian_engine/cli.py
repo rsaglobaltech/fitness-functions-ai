@@ -129,6 +129,9 @@ def analyze(
         bool,
         typer.Option(help="Do not exit 2 when .architecture.yaml is invalid; fall back instead."),
     ] = False,
+    jobs: Annotated[
+        int, typer.Option(min=0, help="Parser processes (0 = one per CPU, max 8).")
+    ] = 0,
     verbose: Annotated[bool, typer.Option("--verbose", "-v", help="Log progress.")] = False,
     log_json: Annotated[bool, typer.Option(help="Emit logs as JSON (stderr).")] = False,
 ) -> None:
@@ -138,7 +141,7 @@ def analyze(
     extras = _parse_reports(extra_reports or [])
 
     try:
-        report = analyze_changes(ChangeAnalysisRequest(path=path, base=base, head=head))
+        report = analyze_changes(ChangeAnalysisRequest(path=path, base=base, head=head, jobs=jobs))
     except GitError as exc:
         _err(str(exc))
         raise typer.Exit(EXIT_USAGE) from exc

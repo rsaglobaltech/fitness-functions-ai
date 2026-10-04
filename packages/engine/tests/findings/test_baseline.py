@@ -60,3 +60,13 @@ def test_renamed_cycle_member_is_mapped() -> None:
     base = _f("a.py", "a", rule_id=cycle, **{MEMBER_FILES_KEY: "a.py,b.py"})
     head = _f("a.py", "a", rule_id=cycle, **{MEMBER_FILES_KEY: "a.py,z.py"})
     assert new_findings([head], [base], {"b.py": "z.py"}) == ()
+
+
+@pytest.mark.unit
+def test_shrinking_a_cycle_is_not_new_but_growing_it_is() -> None:
+    cycle = "universal.circular_dependency"
+    base = _f("a.py", "a", rule_id=cycle, **{MEMBER_FILES_KEY: "a.py,b.py,c.py"})
+    shrunk = _f("a.py", "a", rule_id=cycle, **{MEMBER_FILES_KEY: "a.py,b.py"})
+    grown = _f("a.py", "a", rule_id=cycle, **{MEMBER_FILES_KEY: "a.py,b.py,c.py,d.py"})
+    assert new_findings([shrunk], [base]) == ()
+    assert new_findings([grown], [base]) == (grown,)

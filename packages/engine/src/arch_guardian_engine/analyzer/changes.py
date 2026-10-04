@@ -43,6 +43,7 @@ class ChangeAnalysisRequest:
     head: str = "HEAD"  # "HEAD" analyses the working tree as-is
     rules: UniversalRules | None = None
     today: date | None = None
+    jobs: int = 0  # parser processes; 0 = auto
 
 
 def _renames_within(top: Path, sub: Path, base_sha: str, head: str) -> dict[str, str]:
@@ -70,7 +71,7 @@ def analyze_changes(req: ChangeAnalysisRequest) -> AnalysisReport:
     """Run the universal analysis; see module docstring for base/head semantics."""
     path = req.path.resolve()
     if req.base is None and req.head == "HEAD":
-        return RepositoryAnalyzer(rules=req.rules, today=req.today).analyze(path)
+        return RepositoryAnalyzer(rules=req.rules, today=req.today, jobs=req.jobs).analyze(path)
 
     top = git_toplevel(path)
     sub = path.relative_to(top)
@@ -81,7 +82,9 @@ def analyze_changes(req: ChangeAnalysisRequest) -> AnalysisReport:
         else:
             head_sha = resolve_commit(top, req.head)
             head_root = stack.enter_context(worktree_at(top, head_sha)) / sub
-        head_report = RepositoryAnalyzer(rules=req.rules, today=req.today).analyze(head_root)
+        head_report = RepositoryAnalyzer(rules=req.rules, today=req.today, jobs=req.jobs).analyze(
+            head_root
+        )
         head_report = head_report.model_copy(update={"repo": str(path)})
         if req.base is None:
             return head_report

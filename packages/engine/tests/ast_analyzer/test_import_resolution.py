@@ -137,3 +137,15 @@ def test_deeply_nested_code_does_not_hit_recursion_limit(tmp_path: Path) -> None
     _write(tmp_path, "deep.py", f"def f():\n    return {expr}\n")
     analysis = analyze_repo(tmp_path)
     assert "deep" in analysis.modules
+
+
+@pytest.mark.integration
+def test_parallel_parsing_matches_serial(tmp_path: Path) -> None:
+    for i in range(80):
+        _write(tmp_path, f"pkg/m{i}.py", f"import pkg.m{(i + 1) % 80}\n")
+    _write(tmp_path, "pkg/broken.py", "def (:\n")  # tree-sitter tolerates; must not crash
+    serial = analyze_repo(tmp_path, jobs=1)
+    parallel = analyze_repo(tmp_path, jobs=2)
+    assert list(serial.modules) == list(parallel.modules)
+    assert set(serial.import_graph.edges()) == set(parallel.import_graph.edges())
+    assert serial.import_graph.number_of_edges() == 80
