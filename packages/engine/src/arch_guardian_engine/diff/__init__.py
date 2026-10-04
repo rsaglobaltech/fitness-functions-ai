@@ -13,6 +13,14 @@ content (when available) and a header summary. We deliberately *do not* try
 to parse hunks here — detectors operate on whole files, not line ranges.
 """
 
+from arch_guardian_engine.diff.git import (
+    GitError,
+    git_toplevel,
+    merge_base,
+    resolve_commit,
+    run_git,
+    worktree_at,
+)
 from arch_guardian_engine.diff.local_git import LocalGitDiff
 from arch_guardian_engine.diff.model import (
     ChangedFile,
@@ -28,5 +36,11 @@ __all__ = [
     "Diff",
     "DiffSource",
     "DiffTooLargeError",
+    "GitError",
     "LocalGitDiff",
+    "git_toplevel",
+    "merge_base",
+    "resolve_commit",
+    "run_git",
+    "worktree_at",
 ]

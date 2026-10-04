@@ -36,7 +36,7 @@ def configure_logging(level: str = "INFO", json_logs: bool = False) -> None:
     if json_logs:
         renderer: Processor = structlog.processors.JSONRenderer()
     else:
-        renderer = structlog.dev.ConsoleRenderer(colors=True)
+        renderer = structlog.dev.ConsoleRenderer(colors=sys.stderr.isatty())
 
     structlog.configure(
         processors=[
@@ -56,7 +56,8 @@ def configure_logging(level: str = "INFO", json_logs: bool = False) -> None:
         ],
     )
 
-    handler = logging.StreamHandler(sys.stdout)
+    # stderr: stdout is reserved for machine-readable reports (JSON / SARIF).
+    handler = logging.StreamHandler(sys.stderr)
     handler.setFormatter(formatter)
 
     root = logging.getLogger()

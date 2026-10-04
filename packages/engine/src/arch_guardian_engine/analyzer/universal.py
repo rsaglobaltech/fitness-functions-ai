@@ -38,6 +38,7 @@ class UniversalAnalyzer:
 
     rules: UniversalRules | None = None
     today: date | None = None  # injectable clock for exception expiry
+    apply_exceptions: bool = True
 
     def analyze(self, repo_root: str | Path) -> AnalysisReport:
         start = perf_counter()
@@ -70,9 +71,8 @@ class UniversalAnalyzer:
                 )
             )
 
-        suppression = apply_exceptions(
-            findings, profile.exceptions if profile else (), today=self.today
-        )
+        exceptions = profile.exceptions if profile and self.apply_exceptions else ()
+        suppression = apply_exceptions(findings, exceptions, today=self.today)
 
         duration_ms = int((perf_counter() - start) * 1000)
         rule_pack = None
@@ -87,6 +87,7 @@ class UniversalAnalyzer:
             resolution_source=resolved.source.value,
             rule_pack=rule_pack,
             divergence_warning=resolved.divergence_warning,
+            config_error=resolved.config_error,
             findings=suppression.kept,
             suppressed_count=len(suppression.suppressed),
             warnings=suppression.warnings,

@@ -11,10 +11,10 @@ Why subprocess `git` rather than a Python git library:
 
 from __future__ import annotations
 
-import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
+from arch_guardian_engine.diff.git import run_git
 from arch_guardian_engine.diff.model import (
     ChangedFile,
     ChangeKind,
@@ -49,15 +49,7 @@ class LocalGitDiff:
     max_total_changes: int = _DEFAULT_MAX_CHANGES
 
     def _run(self, *args: str) -> str:
-        # args are constants assembled here; not user-controlled. The "git"
-        # binary is expected on PATH on every CI runner and dev box.
-        result = subprocess.run(  # noqa: S603
-            ["git", "-C", str(self.repo_root), *args],  # noqa: S607
-            check=True,
-            capture_output=True,
-            text=True,
-        )
-        return result.stdout
+        return run_git(self.repo_root, *args)
 
     def collect(self) -> Diff:
         name_status_raw = self._run(

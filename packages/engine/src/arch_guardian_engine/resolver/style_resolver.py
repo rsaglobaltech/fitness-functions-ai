@@ -52,6 +52,7 @@ class ResolvedStyle:
     profile: ArchitectureProfile | None
     detection: DetectionResult | None
     divergence_warning: str | None = None
+    config_error: str | None = None  # `.architecture.yaml` present but invalid
 
 
 def _check_divergence(declared: Style, detection: DetectionResult) -> str | None:
@@ -97,6 +98,7 @@ def resolve_style(
                 profile=None,
                 detection=detection,
                 divergence_warning=f"invalid .architecture.yaml: {exc}",
+                config_error=str(exc),
             )
 
         declared = profile.architecture.style
@@ -133,7 +135,7 @@ def resolve_style(
         )
 
     # Camino C — fallback to universal rules.
-    _log.warning(
+    _log.info(
         "style_fallback_universal",
         detected=detection.style.value,
         confidence=round(detection.confidence, 3),

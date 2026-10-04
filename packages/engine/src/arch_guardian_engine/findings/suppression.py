@@ -18,13 +18,13 @@ from dataclasses import dataclass
 from datetime import date
 
 from arch_guardian_engine.config import ExceptionRule
-from arch_guardian_engine.findings.model import Finding
+from arch_guardian_engine.findings.model import MEMBER_FILES_KEY, Finding
 from arch_guardian_engine.logging import get_logger
 from arch_guardian_engine.paths import matches_glob
 
 _log = get_logger(__name__)
 
-MEMBER_FILES_KEY = "member_files"
+__all__ = ["MEMBER_FILES_KEY", "SuppressionResult", "apply_exceptions"]
 
 
 @dataclass(frozen=True)
@@ -41,18 +41,11 @@ def _rule_matches(rule_id: str, suppress_rules: tuple[str, ...]) -> bool:
     return any(r in (rule_id, short) for r in suppress_rules)
 
 
-def _files_of(finding: Finding) -> list[str]:
-    members = finding.metadata.get(MEMBER_FILES_KEY)
-    if isinstance(members, str) and members:
-        return members.split(",")
-    return [finding.location.file]
-
-
 def _is_suppressed(finding: Finding, rules: list[ExceptionRule]) -> bool:
     applicable = [r for r in rules if _rule_matches(finding.rule_id, r.suppress_rules)]
     if not applicable:
         return False
-    return all(any(matches_glob(f, r.path) for r in applicable) for f in _files_of(finding))
+    return all(any(matches_glob(f, r.path) for r in applicable) for f in finding.files)
 
 
 def _active_rules(
